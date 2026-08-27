@@ -486,8 +486,12 @@
     var strong = document.createElement('strong');
     strong.textContent = session.gate;
     bar.appendChild(strong);
-    bar.appendChild(document.createTextNode(
-      session.scanner ? session.scanner.name : ''));
+    // Keep the signed-in identity visible on a shared phone, but on one line
+    // and first-name only so it truncates gracefully on narrow screens.
+    if (session.scanner && session.scanner.name) {
+      bar.appendChild(document.createTextNode(
+        ' \u00B7 ' + String(session.scanner.name).split(' ')[0]));
+    }
     show('paneScan');
     startCamera();
   });
