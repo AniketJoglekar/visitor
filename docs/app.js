@@ -400,7 +400,7 @@
     list.innerHTML = '';
 
     var rows = [];
-    if (visitor.organisation) rows.push({ label: 'Organisation', value: visitor.organisation });
+    if (visitor.affiliation) rows.push({ label: 'Affiliation', value: visitor.affiliation });
     if (!allow && visitor.type) rows.push({ label: 'Type', value: visitor.type });
     if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose });
     if (visitor.host) rows.push({ label: 'Host', value: visitor.host });
