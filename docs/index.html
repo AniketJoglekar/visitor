@@ -12,7 +12,7 @@
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
   font-src https://fonts.gstatic.com;
   img-src 'self' data: blob: https://ssl.gstatic.com https://www.gstatic.com https://lh3.googleusercontent.com;
-  connect-src https://script.google.com https://script.googleusercontent.com https://accounts.google.com;
+  connect-src https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com https://accounts.google.com;
   frame-src https://accounts.google.com;
   base-uri 'none';
   form-action 'none';
@@ -87,7 +87,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 16px;
+    padding: clamp(8px, 1.4vh, 13px) 16px;
     border-bottom: 1px solid var(--hairline);
     flex: 0 0 auto;
   }
@@ -132,7 +132,7 @@
   .gatestrip {
     position: relative;
     flex: 0 0 auto;
-    padding: 8px 84px;
+    padding: clamp(5px, 1.1vh, 10px) 84px;
     text-align: center;
     border-bottom: 1px solid var(--hairline);
     background: var(--surface);
@@ -222,7 +222,7 @@
   .btn {
     display: block;
     width: 100%;
-    padding: 13px 18px;
+    padding: clamp(11px, 1.9vh, 16px) 18px;
     border-radius: 11px;
     background: var(--raised);
     border: 1px solid var(--hairline);
@@ -372,7 +372,7 @@
 
   .verdict__banner {
     position: relative;
-    padding: 20px 20px 16px;
+    padding: clamp(16px, 3.4vh, 32px) 20px clamp(12px, 2.6vh, 24px);
     background: var(--deny-deep);
     border-bottom: 2px solid var(--deny);
   }
@@ -404,7 +404,7 @@
   .verdict__word {
     font-family: var(--display);
     font-variation-settings: 'wdth' 125, 'wght' 800;
-    font-size: clamp(34px, 11vw, 52px);
+    font-size: clamp(34px, 8.6vh, 62px);
     line-height: 0.9;
     letter-spacing: -0.02em;
     margin: 0;
@@ -417,29 +417,38 @@
   .verdict__name {
     font-family: var(--display);
     font-variation-settings: 'wdth' 100, 'wght' 600;
-    font-size: clamp(19px, 5.4vw, 25px);
+    font-size: clamp(19px, 3.6vh, 28px);
     line-height: 1.2;
-    margin: 10px 0 0;
+    margin: clamp(7px, 1.6vh, 14px) 0 0;
     overflow-wrap: anywhere;
   }
 
   .verdict__name:empty { display: none; }
 
   .verdict__reason:empty,
-  .verdict__meta:empty { display: none; }
+  .verdict__type:empty,
+  .verdict__affil:empty { display: none; }
 
   /* Type and affiliation ride with the name rather than sitting in the facts
      grid — they answer "who is this" and belong beside it. */
-  .verdict__meta {
-    margin: 6px 0 0;
+  .verdict__type {
+    margin: clamp(5px, 1.1vh, 9px) 0 0;
     font-size: 14px;
-    line-height: 1.4;
+    line-height: 1.35;
     color: var(--text);
-    opacity: 0.82;
+    opacity: 0.85;
+  }
+
+  .verdict__affil {
+    margin: 3px 0 0;
+    font-size: 13px;
+    line-height: 1.35;
+    color: var(--muted);
+    overflow-wrap: anywhere;
   }
 
   .verdict__reason {
-    margin: 7px 0 0;
+    margin: clamp(6px, 1.2vh, 10px) 0 0;
     font-size: 15px;
     line-height: 1.45;
     color: var(--text);
@@ -448,7 +457,7 @@
 
   /* signature element: where "now" sits inside the visit window */
 
-  .track { margin: 14px 0 0; }
+  .track { margin: clamp(10px, 2.2vh, 20px) 0 0; }
 
   .track__rail {
     position: relative;
@@ -488,7 +497,7 @@
   }
 
   .track__remaining {
-    margin: 6px 0 0;
+    margin: clamp(4px, 0.9vh, 8px) 0 0;
     font-size: 13px;
     color: var(--muted);
   }
@@ -518,7 +527,7 @@
 
   .facts {
     margin: 0;
-    padding: 14px 20px 2px;
+    padding: clamp(8px, 2vh, 18px) 20px 2px;
     display: grid;
     grid-template-columns: minmax(76px, auto) 1fr;
     gap: 7px 16px;
@@ -552,10 +561,10 @@
 
   .actions {
     margin-top: auto;
-    padding: 10px 20px 14px;
+    padding: clamp(8px, 1.6vh, 14px) 20px clamp(10px, 2vh, 18px);
   }
 
-  .actions .btn + .btn { margin-top: 8px; }
+  .btn + .btn { margin-top: 10px; }
 
   /* ---------- photo overlay ---------- */
 
@@ -674,7 +683,9 @@
 
 <!-- Sign in -->
 <section class="pane pad" id="paneSignin" data-active>
-  <h2>Authorized Personnel Only</h2>
+  <h1>Sign in to scan</h1>
+  <p class="lede">Visitor details are only shown to staff on the authorised list.
+     Use the Google account GAC registered for you.</p>
   <div id="gsiButton"></div>
   <p class="notice" id="signinError" hidden></p>
 </section>
@@ -719,7 +730,8 @@
     <div class="meter" id="meter" aria-hidden="true"></div>
     <p class="verdict__word" id="verdictWord"></p>
     <p class="verdict__name" id="verdictName"></p>
-    <p class="verdict__meta" id="verdictMeta"></p>
+    <p class="verdict__type" id="verdictType"></p>
+    <p class="verdict__affil" id="verdictAffil"></p>
     <p class="verdict__reason" id="verdictReason"></p>
     <div class="track" id="track" hidden>
       <div class="track__rail">

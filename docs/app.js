@@ -151,9 +151,33 @@
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     }).then(function (res) {
-      if (!res.ok) throw new Error('Server returned ' + res.status);
-      return res.json();
-    }).then(function (data) {
+      // Read as text first. Apps Script answers a stale, wrongly-scoped or
+      // unauthorised deployment with an HTML page, and res.json() on that
+      // throws a parse error that says nothing useful about the real cause.
+      return res.text().then(function (body) { return { res: res, body: body }; });
+    }, function () {
+      throw new Error('Could not reach the server. Check the phone\u2019s network, ' +
+                      'then check API_URL in config.js.');
+    }).then(function (r) {
+      var body = (r.body || '').trim();
+
+      if (/^<(!doctype|html)/i.test(body) || body.indexOf('<HTML') === 0) {
+        throw new Error('The API URL returned a web page instead of data. Usually ' +
+                        'the deployment is out of date, its access is not set to ' +
+                        '"Anyone", or config.js points at the wrong /exec URL.');
+      }
+      if (!r.res.ok) throw new Error('Server returned HTTP ' + r.res.status + '.');
+      if (body.charAt(0) !== '{') {
+        throw new Error('Unexpected reply from the server (' +
+                        (body ? body.substring(0, 60) : 'empty response') + ').');
+      }
+
+      var data;
+      try {
+        data = JSON.parse(body);
+      } catch (err) {
+        throw new Error('Server reply was not readable.');
+      }
       if (data && data.authError) {
         requireSignIn(data.error);
         throw new Error(data.error);
@@ -288,7 +312,7 @@
       .catch(function (err) {
         leaveCapturedState();
         if (String(err.message) !== 'Signed out') {
-          notice('scanError', 'No answer from the server. Check the network and try again.');
+          notice('scanError', err.message || 'The scan could not be checked.');
           resumeScanning();
         }
       });
@@ -476,7 +500,9 @@
         img.src = 'data:' + data.mime + ';base64,' + data.data;
       })
       .catch(function (err) {
-        if (String(err.message) !== 'Signed out') status.textContent = 'Photograph could not be loaded.';
+        if (String(err.message) !== 'Signed out') {
+          status.textContent = err.message || 'Photograph could not be loaded.';
+        }
       });
   }
 
