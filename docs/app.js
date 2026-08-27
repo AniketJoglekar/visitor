@@ -328,10 +328,8 @@
     var visitor = data.visitor || {};
     el('verdictName').textContent = visitor.name || '';
 
-    var meta = [];
-    if (visitor.type) meta.push(visitor.type);
-    if (visitor.affiliation) meta.push(visitor.affiliation);
-    el('verdictMeta').textContent = meta.join(' \u00B7 ');
+    el('verdictType').textContent = visitor.type || '';
+    el('verdictAffil').textContent = visitor.affiliation || '';
 
     el('verdictReason').textContent = allow ? '' : (data.reason || 'This pass is not valid.');
 
@@ -366,7 +364,8 @@
     closePhoto();
     el('verdictWord').textContent = '';
     el('verdictName').textContent = '';
-    el('verdictMeta').textContent = '';
+    el('verdictType').textContent = '';
+    el('verdictAffil').textContent = '';
     el('verdictReason').textContent = '';
     el('verdictFacts').innerHTML = '';
     el('verdictFlag').hidden = true;
