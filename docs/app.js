@@ -405,9 +405,10 @@
     if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose });
     if (visitor.host) rows.push({ label: 'Host', value: visitor.host });
     if (visitor.hostPhone) rows.push({ label: 'Phone', value: visitor.hostPhone, tel: true });
-    if (!allow && visitor.validFromText) {
+    if (!allow && visitor.validFrom) {
       rows.push({ label: 'Window',
-                  value: visitor.validFromText + ' \u2192 ' + visitor.validUntilText });
+                  value: formatTime(visitor.validFrom) + ' \u2192 ' +
+                         formatTime(visitor.validUntil) });
     }
     if (data.scanCount) rows.push({ label: 'Entries', value: String(data.scanCount) });
     if (data.passId) rows.push({ label: 'Pass', value: data.passId, mono: true });
