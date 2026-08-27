@@ -119,10 +119,9 @@
     white-space: nowrap;
   }
 
-  .bar__gate {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--muted);
+  .bar__who {
+    font-size: 13px;
+    color: var(--text);
     margin-left: auto;
     min-width: 0;
     white-space: nowrap;
@@ -130,7 +129,30 @@
     text-overflow: ellipsis;
   }
 
-  .bar__gate strong { color: var(--text); font-weight: 500; }
+  .gatestrip {
+    flex: 0 0 auto;
+    padding: 9px 16px 10px;
+    text-align: center;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--surface);
+  }
+
+  .gatestrip__label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+
+  .gatestrip__name {
+    font-family: var(--display);
+    font-variation-settings: 'wdth' 106, 'wght' 600;
+    font-size: 16px;
+    line-height: 1.1;
+    color: var(--text);
+  }
 
   .bar__out {
     flex: 0 0 auto;
@@ -260,6 +282,55 @@
     bottom: -1px; right: -1px;
     border-left: 0; border-top: 0;
     border-radius: 0 0 12px 0;
+  }
+
+  /* Same footprint as the viewport so nothing shifts when they swap. */
+  .checking {
+    width: min(100%, 62vh);
+    aspect-ratio: 1;
+    border-radius: 18px;
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    padding: 24px;
+  }
+
+  .checking .spinner { width: 30px; height: 30px; border-width: 3px; }
+
+  .checking__label {
+    margin: 0;
+    font-family: var(--display);
+    font-variation-settings: 'wdth' 104, 'wght' 600;
+    font-size: 19px;
+    color: var(--text);
+  }
+
+  .checking__timer {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--brass);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .checking__note {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--muted);
+    max-width: 24ch;
+  }
+
+  .facts dd a {
+    color: var(--brass);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(201, 162, 55, 0.4);
   }
 
   .scan__hint {
@@ -554,9 +625,14 @@
     <span class="bar__mark-top">IIT Tirupati</span>
     <span class="bar__mark-sub">Visitor Pass Scanner</span>
   </span>
-  <span class="bar__gate" id="barGate" hidden></span>
+  <span class="bar__who" id="barWho" hidden></span>
   <button class="bar__out" id="signOut" hidden>Sign out</button>
 </header>
+
+<div class="gatestrip" id="gateStrip" hidden>
+  <span class="gatestrip__label">Gate</span>
+  <span class="gatestrip__name" id="gateStripName"></span>
+</div>
 
 <!-- Sign in -->
 <section class="pane pad" id="paneSignin" data-active>
@@ -583,10 +659,18 @@
 <!-- Camera -->
 <section class="pane" id="paneScan">
   <div class="scan">
-    <div class="viewport">
+    <div class="viewport" id="viewport">
       <video id="video" playsinline muted></video>
       <div class="reticle"></div>
     </div>
+
+    <div class="checking" id="checking" hidden>
+      <span class="spinner"></span>
+      <p class="checking__label">Pass captured</p>
+      <p class="checking__timer" id="checkingTimer">0.0s</p>
+      <p class="checking__note">You can take the pass away. Checking with the server…</p>
+    </div>
+
     <p class="scan__hint" id="scanHint">Hold the visitor's QR code inside the frame.</p>
   </div>
   <p class="notice" id="scanError" hidden></p>

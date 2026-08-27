@@ -10,6 +10,7 @@
   var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false };
   var lastToken = { value: null, at: 0 };
   var current = null;
+  var checkTimer = null;
 
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
@@ -61,6 +62,8 @@
     post({ action: 'session' }).then(function (data) {
       if (!data.ok) { notice('signinError', data.error || 'Sign-in refused.'); return; }
       session.scanner = data.scanner;
+      el('barWho').textContent = data.scanner.name || data.scanner.email || '';
+      el('barWho').hidden = false;
       el('signOut').hidden = false;
       touchActivity();
       if (data.scanner.gate) el('gateSelect').value = data.scanner.gate;
@@ -107,8 +110,10 @@
     lastToken = { value: null, at: 0 };
     clearVerdict();
     stopCamera();
-    el('barGate').hidden = true;
+    el('barWho').hidden = true;
+    el('gateStrip').hidden = true;
     el('signOut').hidden = true;
+    leaveCapturedState();
     show('paneSignin');
     notice('signinError', message || 'Sign in again to continue.');
     if (window.google && google.accounts && google.accounts.id) {
@@ -159,6 +164,7 @@
 
   function startCamera() {
     notice('scanError', '');
+    leaveCapturedState();
     el('scanHint').textContent = 'Hold the visitor\u2019s QR code inside the frame.';
 
     camera.decode = getDecoder();
@@ -232,17 +238,39 @@
     camera.raf = requestAnimationFrame(tick);
   }
 
+  function enterCapturedState() {
+    camera.running = false;
+    if (camera.raf) { cancelAnimationFrame(camera.raf); camera.raf = null; }
+    // Blank the camera immediately. Until this existed, the guard had no cue
+    // that the code had been read and kept holding the pass up.
+    el('viewport').hidden = true;
+    el('checking').hidden = false;
+    el('scanHint').textContent = '';
+
+    var started = Date.now();
+    el('checkingTimer').textContent = '0.0s';
+    if (checkTimer) window.clearInterval(checkTimer);
+    checkTimer = window.setInterval(function () {
+      el('checkingTimer').textContent = ((Date.now() - started) / 1000).toFixed(1) + 's';
+    }, 100);
+  }
+
+  function leaveCapturedState() {
+    if (checkTimer) { window.clearInterval(checkTimer); checkTimer = null; }
+    el('checking').hidden = true;
+    el('viewport').hidden = false;
+  }
+
   function onCode(token) {
     var now = Date.now();
     if (token === lastToken.value && now - lastToken.at < 2500) return;
     lastToken = { value: token, at: now };
 
-    camera.running = false;
-    if (camera.raf) { cancelAnimationFrame(camera.raf); camera.raf = null; }
-    el('scanHint').innerHTML = '<span class="spinner"></span> Checking\u2026';
+    enterCapturedState();
 
     post({ action: 'scan', token: token, gate: session.gate })
       .then(function (data) {
+        leaveCapturedState();
         if (!data.ok) {
           notice('scanError', data.error || 'Could not check that pass.');
           resumeScanning();
@@ -254,6 +282,7 @@
         touchActivity();
       })
       .catch(function (err) {
+        leaveCapturedState();
         if (String(err.message) !== 'Signed out') {
           notice('scanError', 'No answer from the server. Check the network and try again.');
           resumeScanning();
@@ -262,6 +291,7 @@
   }
 
   function resumeScanning() {
+    leaveCapturedState();
     el('scanHint').textContent = 'Hold the visitor\u2019s QR code inside the frame.';
     if (camera.stream) { camera.running = true; tick(); }
     else startCamera();
@@ -370,22 +400,35 @@
     list.innerHTML = '';
 
     var rows = [];
-    if (visitor.organisation) rows.push(['Organisation', visitor.organisation, false]);
-    if (!allow && visitor.type) rows.push(['Type', visitor.type, false]);
-    if (visitor.purpose) rows.push(['Purpose', visitor.purpose, false]);
-    if (visitor.host) rows.push(['Host', visitor.host, false]);
+    if (visitor.organisation) rows.push({ label: 'Organisation', value: visitor.organisation });
+    if (!allow && visitor.type) rows.push({ label: 'Type', value: visitor.type });
+    if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose });
+    if (visitor.host) rows.push({ label: 'Host', value: visitor.host });
+    if (visitor.hostPhone) rows.push({ label: 'Phone', value: visitor.hostPhone, tel: true });
     if (!allow && visitor.validFromText) {
-      rows.push(['Window', visitor.validFromText + ' \u2192 ' + visitor.validUntilText, false]);
+      rows.push({ label: 'Window',
+                  value: visitor.validFromText + ' \u2192 ' + visitor.validUntilText });
     }
-    if (data.scanCount) rows.push(['Entries', String(data.scanCount), false]);
-    if (data.passId) rows.push(['Pass', data.passId, true]);
+    if (data.scanCount) rows.push({ label: 'Entries', value: String(data.scanCount) });
+    if (data.passId) rows.push({ label: 'Pass', value: data.passId, mono: true });
 
     rows.forEach(function (row) {
       var dt = document.createElement('dt');
-      dt.textContent = row[0];
+      dt.textContent = row.label;
       var dd = document.createElement('dd');
-      dd.textContent = row[1];
-      if (row[2]) dd.className = 'mono';
+      if (row.mono) dd.className = 'mono';
+
+      if (row.tel) {
+        // Tappable so the gate can call the host without retyping. The server
+        // has already stripped this to dialable characters only.
+        var link = document.createElement('a');
+        link.href = 'tel:' + String(row.value).replace(/[^0-9+]/g, '');
+        link.textContent = row.value;
+        dd.appendChild(link);
+      } else {
+        dd.textContent = row.value;
+      }
+
       list.appendChild(dt);
       list.appendChild(dd);
     });
@@ -480,18 +523,8 @@
   el('gateConfirm').addEventListener('click', function () {
     session.gate = el('gateSelect').value;
     localStorage.setItem('gate', session.gate);
-    var bar = el('barGate');
-    bar.hidden = false;
-    bar.innerHTML = '';
-    var strong = document.createElement('strong');
-    strong.textContent = session.gate;
-    bar.appendChild(strong);
-    // Keep the signed-in identity visible on a shared phone, but on one line
-    // and first-name only so it truncates gracefully on narrow screens.
-    if (session.scanner && session.scanner.name) {
-      bar.appendChild(document.createTextNode(
-        ' \u00B7 ' + String(session.scanner.name).split(' ')[0]));
-    }
+    el('gateStripName').textContent = session.gate;
+    el('gateStrip').hidden = false;
     show('paneScan');
     startCamera();
   });
