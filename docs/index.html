@@ -87,7 +87,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--hairline);
     flex: 0 0 auto;
   }
@@ -130,28 +130,41 @@
   }
 
   .gatestrip {
+    position: relative;
     flex: 0 0 auto;
-    padding: 9px 16px 10px;
+    padding: 8px 84px;
     text-align: center;
     border-bottom: 1px solid var(--hairline);
     background: var(--surface);
   }
 
   .gatestrip__label {
-    display: block;
     font-size: 10px;
     letter-spacing: 0.13em;
     text-transform: uppercase;
     color: var(--muted);
-    margin-bottom: 3px;
+    margin-right: 7px;
   }
 
   .gatestrip__name {
     font-family: var(--display);
     font-variation-settings: 'wdth' 106, 'wght' 600;
     font-size: 16px;
-    line-height: 1.1;
+    line-height: 1.35;
     color: var(--text);
+  }
+
+  .gatestrip__change {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    padding: 6px 11px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--ink);
   }
 
   .bar__out {
@@ -474,16 +487,10 @@
     color: var(--muted);
   }
 
-  .track__ends span:first-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .track__remaining {
-    color: var(--text);
-    opacity: 0.85;
-    white-space: nowrap;
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--muted);
   }
 
   .flag {
@@ -514,7 +521,7 @@
     padding: 14px 20px 2px;
     display: grid;
     grid-template-columns: minmax(76px, auto) 1fr;
-    gap: 8px 16px;
+    gap: 7px 16px;
     align-items: baseline;
   }
 
@@ -545,12 +552,10 @@
 
   .actions {
     margin-top: auto;
-    display: flex;
-    gap: 8px;
-    padding: 12px 20px 16px;
+    padding: 10px 20px 14px;
   }
 
-  .actions .btn { flex: 1 1 0; min-width: 0; }
+  .actions .btn + .btn { margin-top: 8px; }
 
   /* ---------- photo overlay ---------- */
 
@@ -664,18 +669,21 @@
 <div class="gatestrip" id="gateStrip" hidden>
   <span class="gatestrip__label">Gate</span>
   <span class="gatestrip__name" id="gateStripName"></span>
+  <button class="gatestrip__change" id="gateChange">Change</button>
 </div>
 
 <!-- Sign in -->
 <section class="pane pad" id="paneSignin" data-active>
-  <h2>Authorized Personnel Only</h2>
+  <h1>Sign in to scan</h1>
+  <p class="lede">Visitor details are only shown to staff on the authorised list.
+     Use the Google account GAC registered for you.</p>
   <div id="gsiButton"></div>
   <p class="notice" id="signinError" hidden></p>
 </section>
 
 <!-- Choose gate -->
 <section class="pane pad" id="paneGate">
-  <h1>Which gate?</h1>
+  <h1 id="gateHeading">Which gate?</h1>
   <label class="field" for="gateSelect">Post</label>
   <select id="gateSelect">
     <option value="Main Gate">Main Gate</option>
@@ -684,6 +692,7 @@
   </select>
   <div style="height:20px"></div>
   <button class="btn btn--primary" id="gateConfirm">Start scanning</button>
+  <button class="btn" id="gateCancel" hidden>Cancel</button>
 </section>
 
 <!-- Camera -->
@@ -720,9 +729,10 @@
         <div class="track__now" id="trackNow"></div>
       </div>
       <div class="track__ends">
-        <span id="trackSpan"></span>
-        <span class="track__remaining" id="trackRemaining"></span>
+        <span id="trackFrom"></span>
+        <span id="trackUntil"></span>
       </div>
+      <p class="track__remaining" id="trackRemaining"></p>
     </div>
   </div>
 

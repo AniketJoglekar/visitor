@@ -67,8 +67,12 @@
       el('signOut').hidden = false;
       touchActivity();
       if (data.scanner.gate) el('gateSelect').value = data.scanner.gate;
-      var saved = localStorage.getItem('gate');
+      var saved = null;
+      try { saved = localStorage.getItem('gate'); } catch (e) {}
       if (saved) el('gateSelect').value = saved;
+      el('gateCancel').hidden = true;
+      el('gateConfirm').textContent = 'Start scanning';
+      el('gateHeading').textContent = 'Which gate?';
       show('paneGate');
     }).catch(function (err) {
       notice('signinError', String(err.message || err));
@@ -384,15 +388,15 @@
     track.hidden = false;
     el('trackFill').style.width = (ratio * 100).toFixed(2) + '%';
     el('trackNow').style.left = 'calc(' + (ratio * 100).toFixed(2) + '% - 1px)';
-    el('trackSpan').textContent =
-      formatTime(visitor.validFrom) + '  \u2192  ' + formatTime(visitor.validUntil);
+    el('trackFrom').textContent = formatTime(visitor.validFrom);
+    el('trackUntil').textContent = formatTime(visitor.validUntil);
 
     var minutesLeft = Math.round((until - now) / 60000);
     el('trackRemaining').textContent = minutesLeft <= 0
-      ? 'closing now'
+      ? 'Closing now.'
       : minutesLeft < 90
-        ? minutesLeft + ' min left'
-        : Math.round(minutesLeft / 60) + ' hr left';
+        ? 'Valid for another ' + minutesLeft + ' min.'
+        : 'Valid for another ' + Math.round(minutesLeft / 60) + ' hours.';
   }
 
   function renderFlag(warning) {
@@ -527,13 +531,38 @@
   // Wiring
   // -------------------------------------------------------------------------
 
-  el('gateConfirm').addEventListener('click', function () {
-    session.gate = el('gateSelect').value;
-    localStorage.setItem('gate', session.gate);
-    el('gateStripName').textContent = session.gate;
+  function openGatePicker(isChange) {
+    // Changing gate mid-shift must not require signing out — a guard who
+    // picked the wrong post should be able to correct it in two taps, and the
+    // gate is what the scan log records.
+    el('gateCancel').hidden = !isChange;
+    el('gateConfirm').textContent = isChange ? 'Use this gate' : 'Start scanning';
+    el('gateHeading').textContent = isChange ? 'Change gate' : 'Which gate?';
+    if (session.gate) el('gateSelect').value = session.gate;
+    clearVerdict();
+    show('paneGate');
+  }
+
+  function applyGate(gate) {
+    session.gate = gate;
+    try { localStorage.setItem('gate', gate); } catch (e) {}
+    el('gateStripName').textContent = gate;
     el('gateStrip').hidden = false;
+  }
+
+  el('gateConfirm').addEventListener('click', function () {
+    applyGate(el('gateSelect').value);
     show('paneScan');
     startCamera();
+  });
+
+  el('gateCancel').addEventListener('click', function () {
+    show('paneScan');
+    startCamera();
+  });
+
+  el('gateChange').addEventListener('click', function () {
+    openGatePicker(true);
   });
 
   el('scanNext').addEventListener('click', function () {
