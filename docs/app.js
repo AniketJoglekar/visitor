@@ -323,9 +323,13 @@
     el('verdictWord').textContent = allow ? 'ALLOW' : 'DENY';
     var visitor = data.visitor || {};
     el('verdictName').textContent = visitor.name || '';
-    el('verdictReason').textContent = allow
-      ? (visitor.type ? visitor.type : '')
-      : (data.reason || 'This pass is not valid.');
+
+    var meta = [];
+    if (visitor.type) meta.push(visitor.type);
+    if (visitor.affiliation) meta.push(visitor.affiliation);
+    el('verdictMeta').textContent = meta.join(' \u00B7 ');
+
+    el('verdictReason').textContent = allow ? '' : (data.reason || 'This pass is not valid.');
 
     renderTrack(allow, visitor, data.now);
     renderFlag(data.warning);
@@ -358,6 +362,7 @@
     closePhoto();
     el('verdictWord').textContent = '';
     el('verdictName').textContent = '';
+    el('verdictMeta').textContent = '';
     el('verdictReason').textContent = '';
     el('verdictFacts').innerHTML = '';
     el('verdictFlag').hidden = true;
@@ -379,15 +384,15 @@
     track.hidden = false;
     el('trackFill').style.width = (ratio * 100).toFixed(2) + '%';
     el('trackNow').style.left = 'calc(' + (ratio * 100).toFixed(2) + '% - 1px)';
-    el('trackFrom').textContent = formatTime(visitor.validFrom);
-    el('trackUntil').textContent = formatTime(visitor.validUntil);
+    el('trackSpan').textContent =
+      formatTime(visitor.validFrom) + '  \u2192  ' + formatTime(visitor.validUntil);
 
     var minutesLeft = Math.round((until - now) / 60000);
     el('trackRemaining').textContent = minutesLeft <= 0
-      ? 'Closing now.'
+      ? 'closing now'
       : minutesLeft < 90
-        ? 'Valid for another ' + minutesLeft + ' min.'
-        : 'Valid for another ' + Math.round(minutesLeft / 60) + ' hours.';
+        ? minutesLeft + ' min left'
+        : Math.round(minutesLeft / 60) + ' hr left';
   }
 
   function renderFlag(warning) {
@@ -399,10 +404,11 @@
     var list = el('verdictFacts');
     list.innerHTML = '';
 
+    // Type and affiliation are in the banner; the pass ID is a machine
+    // identifier no one at a gate acts on. Both left out so the buttons stay
+    // reachable without scrolling.
     var rows = [];
-    if (visitor.affiliation) rows.push({ label: 'Affiliation', value: visitor.affiliation });
-    if (!allow && visitor.type) rows.push({ label: 'Type', value: visitor.type });
-    if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose });
+    if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose, clamp: true });
     if (visitor.host) rows.push({ label: 'Host', value: visitor.host });
     if (visitor.hostPhone) rows.push({ label: 'Phone', value: visitor.hostPhone, tel: true });
     if (!allow && visitor.validFrom) {
@@ -411,13 +417,13 @@
                          formatTime(visitor.validUntil) });
     }
     if (data.scanCount) rows.push({ label: 'Entries', value: String(data.scanCount) });
-    if (data.passId) rows.push({ label: 'Pass', value: data.passId, mono: true });
 
     rows.forEach(function (row) {
       var dt = document.createElement('dt');
       dt.textContent = row.label;
       var dd = document.createElement('dd');
       if (row.mono) dd.className = 'mono';
+      if (row.clamp) dd.className = 'clamp';
 
       if (row.tel) {
         // Tappable so the gate can call the host without retyping. The server
