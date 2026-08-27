@@ -11,6 +11,9 @@
   var lastToken = { value: null, at: 0 };
   var current = null;
 
+  var IDLE_CLEAR_MS = 90 * 1000;
+  var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
+
   /**
    * Different jsQR builds attach different things to window. 1.4.0 exposes the
    * function directly; some earlier and CDN/ESM builds expose
@@ -101,15 +104,11 @@
     session.idToken = null;
     session.expiresAt = 0;
     session.scanner = null;
-    current = null;
     lastToken = { value: null, at: 0 };
-    closePhoto();
+    clearVerdict();
     stopCamera();
     el('barGate').hidden = true;
     el('signOut').hidden = true;
-    el('verdictFacts').innerHTML = '';
-    el('verdictName').textContent = '';
-    el('verdictReason').textContent = '';
     show('paneSignin');
     notice('signinError', message || 'Sign in again to continue.');
     if (window.google && google.accounts && google.accounts.id) {
@@ -306,7 +305,35 @@
     photoBtn.hidden = !data.hasPhoto;
     photoBtn.textContent = 'Show photo';
 
+    startMeter();
     pane.scrollTop = 0;
+  }
+
+  function startMeter() {
+    var meter = el('meter');
+    meter.classList.remove('meter--run');
+    meter.style.setProperty('--idle', (IDLE_CLEAR_MS / 1000) + 's');
+    void meter.offsetWidth;           // force reflow so the animation restarts
+    meter.classList.add('meter--run');
+  }
+
+  function stopMeter() {
+    el('meter').classList.remove('meter--run');
+  }
+
+  /** Wipes every trace of the previous visitor from the verdict pane. */
+  function clearVerdict() {
+    stopMeter();
+    current = null;
+    closePhoto();
+    el('verdictWord').textContent = '';
+    el('verdictName').textContent = '';
+    el('verdictReason').textContent = '';
+    el('verdictFacts').innerHTML = '';
+    el('verdictFlag').hidden = true;
+    el('track').hidden = true;
+    el('showPhoto').hidden = true;
+    el('paneVerdict').classList.remove('verdict--allow');
   }
 
   function renderTrack(allow, visitor, nowIso) {
@@ -402,11 +429,14 @@
 
   function closePhoto() {
     var overlay = el('photoOverlay');
+    var wasOpen = overlay.hasAttribute('data-open');
     overlay.removeAttribute('data-open');
     var img = el('photoImg');
     img.hidden = true;
     img.removeAttribute('src');
-    el('showPhoto').focus();
+    // Only pull focus back if the overlay was actually open — clearVerdict()
+    // calls this defensively and should not move focus.
+    if (wasOpen && !el('showPhoto').hidden) el('showPhoto').focus();
   }
 
   // -------------------------------------------------------------------------
@@ -419,20 +449,12 @@
    * desk was leaving a visitor's details on display, and an unattended signed-in
    * session is usable by whoever picks it up.
    */
-  var IDLE_CLEAR_MS = 90 * 1000;
-  var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
   var idleClear = null;
   var idleSignout = null;
 
   function clearVisitorFromScreen() {
     if (!el('paneVerdict').hasAttribute('data-active')) return;
-    current = null;
-    closePhoto();
-    el('verdictFacts').innerHTML = '';
-    el('verdictName').textContent = '';
-    el('verdictReason').textContent = '';
-    el('track').hidden = true;
-    el('verdictFlag').hidden = true;
+    clearVerdict();
     show('paneScan');
     startCamera();
   }
@@ -471,7 +493,7 @@
   });
 
   el('scanNext').addEventListener('click', function () {
-    current = null;
+    clearVerdict();
     show('paneScan');
     startCamera();
   });

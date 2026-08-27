@@ -46,6 +46,11 @@
 
   * { box-sizing: border-box; }
 
+  /* Author display rules outrank the browser's [hidden] rule at equal
+     specificity, which silently un-hides anything styled with display.
+     This makes the attribute authoritative again. */
+  [hidden] { display: none !important; }
+
   html, body {
     margin: 0;
     height: 100%;
@@ -115,8 +120,6 @@
     font-size: 13px;
     color: var(--muted);
   }
-
-  .bar__out[hidden] { display: none; }
 
   /* ---------- panes ---------- */
 
@@ -248,19 +251,46 @@
 
   /* ---------- verdict ---------- */
 
-  .verdict {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow-y: auto;
+  /* No display declaration here on purpose — .pane[data-active] owns that.
+     Adding one back re-breaks pane switching. */
+  .verdict { overflow-y: auto; }
+
+  .verdict__banner,
+  .facts,
+  .flag { animation: rise 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+  .facts { animation-delay: 40ms; }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
   }
 
   .verdict__banner {
-    padding: 26px 20px 22px;
+    position: relative;
+    padding: 30px 20px 24px;
     background: var(--deny-deep);
-    border-bottom: 3px solid var(--deny);
+    border-bottom: 2px solid var(--deny);
   }
+
+  /* Depletes over the idle window, so the screen visibly intends to clear
+     itself rather than sitting on a visitor's details indefinitely. */
+  .meter {
+    position: absolute;
+    top: 0; left: 0;
+    height: 2px;
+    width: 100%;
+    background: currentColor;
+    opacity: 0.5;
+    transform-origin: left center;
+    color: var(--deny);
+  }
+
+  .verdict--allow .meter { color: var(--allow); }
+
+  .meter--run { animation: deplete var(--idle, 90s) linear forwards; }
+
+  @keyframes deplete { to { transform: scaleX(0); } }
 
   .verdict--allow .verdict__banner {
     background: var(--allow-deep);
@@ -270,10 +300,11 @@
   .verdict__word {
     font-family: var(--display);
     font-variation-settings: 'wdth' 125, 'wght' 800;
-    font-size: clamp(44px, 15vw, 76px);
-    line-height: 0.9;
-    letter-spacing: -0.015em;
+    font-size: clamp(46px, 15vw, 74px);
+    line-height: 0.88;
+    letter-spacing: -0.02em;
     margin: 0;
+    min-height: 0.88em;     /* keeps layout steady between states */
     color: var(--deny);
   }
 
@@ -284,11 +315,16 @@
     font-variation-settings: 'wdth' 100, 'wght' 600;
     font-size: clamp(21px, 6vw, 28px);
     line-height: 1.2;
-    margin: 14px 0 0;
+    margin: 16px 0 0;
+    overflow-wrap: anywhere;
   }
 
+  .verdict__name:empty { display: none; }
+
+  .verdict__reason:empty { display: none; }
+
   .verdict__reason {
-    margin: 10px 0 0;
+    margin: 9px 0 0;
     font-size: 15px;
     line-height: 1.5;
     color: var(--text);
@@ -344,7 +380,7 @@
   .flag {
     display: flex;
     gap: 10px;
-    margin: 18px 20px 0;
+    margin: 16px 20px 0;
     padding: 13px 15px;
     border-radius: 10px;
     background: var(--warn-deep);
@@ -362,9 +398,11 @@
     background: var(--warn);
   }
 
+  .facts:empty { display: none; }
+
   .facts {
     margin: 0;
-    padding: 20px;
+    padding: 18px 20px 4px;
     display: grid;
     grid-template-columns: minmax(84px, auto) 1fr;
     gap: 11px 18px;
@@ -468,8 +506,6 @@
     line-height: 1.5;
   }
 
-  .notice[hidden] { display: none; }
-
   .spinner {
     width: 17px;
     height: 17px;
@@ -485,6 +521,8 @@
 
   @media (prefers-reduced-motion: reduce) {
     .spinner { animation-duration: 2.4s; }
+    .verdict__banner, .facts, .flag { animation: none; }
+    .meter--run { animation: none; opacity: 0.25; }
     * { transition: none !important; }
   }
 </style>
@@ -538,7 +576,8 @@
 <!-- Verdict -->
 <section class="pane verdict" id="paneVerdict">
   <div class="verdict__banner">
-    <p class="verdict__word" id="verdictWord">DENY</p>
+    <div class="meter" id="meter" aria-hidden="true"></div>
+    <p class="verdict__word" id="verdictWord"></p>
     <p class="verdict__name" id="verdictName"></p>
     <p class="verdict__reason" id="verdictReason"></p>
     <div class="track" id="track" hidden>
