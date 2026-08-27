@@ -2,6 +2,8 @@
 (function () {
   'use strict';
 
+  if (window.__FRAMED__) return;
+
   var el = function (id) { return document.getElementById(id); };
 
   var session = { idToken: null, expiresAt: 0, scanner: null, gate: null };
@@ -57,6 +59,7 @@
       if (!data.ok) { notice('signinError', data.error || 'Sign-in refused.'); return; }
       session.scanner = data.scanner;
       el('signOut').hidden = false;
+      touchActivity();
       if (data.scanner.gate) el('gateSelect').value = data.scanner.gate;
       var saved = localStorage.getItem('gate');
       if (saved) el('gateSelect').value = saved;
@@ -249,6 +252,7 @@
         current = { token: token, data: data };
         renderVerdict(data);
         show('paneVerdict');
+        touchActivity();
       })
       .catch(function (err) {
         if (String(err.message) !== 'Signed out') {
@@ -404,6 +408,48 @@
     img.removeAttribute('src');
     el('showPhoto').focus();
   }
+
+  // -------------------------------------------------------------------------
+  // Idle handling
+  // -------------------------------------------------------------------------
+
+  /*
+   * A verdict screen holds a name, purpose, host and a photograph, and it used
+   * to stay there until someone pressed a button. A gate phone put down on a
+   * desk was leaving a visitor's details on display, and an unattended signed-in
+   * session is usable by whoever picks it up.
+   */
+  var IDLE_CLEAR_MS = 90 * 1000;
+  var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
+  var idleClear = null;
+  var idleSignout = null;
+
+  function clearVisitorFromScreen() {
+    if (!el('paneVerdict').hasAttribute('data-active')) return;
+    current = null;
+    closePhoto();
+    el('verdictFacts').innerHTML = '';
+    el('verdictName').textContent = '';
+    el('verdictReason').textContent = '';
+    el('track').hidden = true;
+    el('verdictFlag').hidden = true;
+    show('paneScan');
+    startCamera();
+  }
+
+  function touchActivity() {
+    if (idleClear) window.clearTimeout(idleClear);
+    if (idleSignout) window.clearTimeout(idleSignout);
+    if (!session.idToken) return;
+    idleClear = window.setTimeout(clearVisitorFromScreen, IDLE_CLEAR_MS);
+    idleSignout = window.setTimeout(function () {
+      signOut();
+    }, IDLE_SIGNOUT_MS);
+  }
+
+  ['click', 'touchstart', 'keydown'].forEach(function (evt) {
+    document.addEventListener(evt, touchActivity, { passive: true });
+  });
 
   // -------------------------------------------------------------------------
   // Wiring
