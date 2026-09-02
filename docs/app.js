@@ -553,6 +553,9 @@
     if (visitor.host || visitor.hostPhone) {
       rows.push({ label: 'Host', value: visitor.host || '', tel: visitor.hostPhone || '' });
     }
+    if (visitor.visitorPhone) {
+      rows.push({ label: 'Visitor phone', value: '', tel: visitor.visitorPhone });
+    }
     if (!allow && visitor.validFrom) {
       rows.push({ label: 'Window',
                   value: formatTime(visitor.validFrom) + ' \u2192 ' +
