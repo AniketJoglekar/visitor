@@ -528,12 +528,23 @@
     el('trackFrom').textContent = formatTime(visitor.validFrom);
     el('trackUntil').textContent = formatTime(visitor.validUntil);
 
+    // A pass can be allowed while outside its stated window, because the server
+    // applies a silent buffer either side. Saying "valid for another 4 hours"
+    // before the visit starts, or "closing now" while there is still an hour of
+    // buffer left, would both be wrong. State the fact instead — the stated
+    // times, never the buffer.
     var minutesLeft = Math.round((until - now) / 60000);
-    el('trackRemaining').textContent = minutesLeft <= 0
-      ? 'Closing now.'
-      : minutesLeft < 90
-        ? 'Valid for another ' + minutesLeft + ' min.'
-        : 'Valid for another ' + Math.round(minutesLeft / 60) + ' hours.';
+    var line;
+    if (now < from) {
+      line = 'Visit starts at ' + formatTime(visitor.validFrom) + '.';
+    } else if (now > until) {
+      line = 'Visit window ended at ' + formatTime(visitor.validUntil) + '.';
+    } else if (minutesLeft < 90) {
+      line = 'Valid for another ' + minutesLeft + ' min.';
+    } else {
+      line = 'Valid for another ' + Math.round(minutesLeft / 60) + ' hours.';
+    }
+    el('trackRemaining').textContent = line;
   }
 
   function renderFlag(warning) {
