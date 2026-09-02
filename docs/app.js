@@ -2,7 +2,22 @@
 (function () {
   'use strict';
 
+  /*
+   * guard.js normally does the frame check and removes the framebust style.
+   * Repeat both here so that either script alone is sufficient: if guard.js
+   * fails to load — a wrong deploy path is the usual cause — the app still
+   * refuses to run framed, and the page is not left silently blank. Only if
+   * both scripts are missing does nothing render, at which point nothing works
+   * anyway.
+   */
+  if (window.top !== window.self) {
+    window.__FRAMED__ = true;
+    return;
+  }
   if (window.__FRAMED__) return;
+
+  var framebust = document.getElementById('framebust');
+  if (framebust && framebust.parentNode) framebust.parentNode.removeChild(framebust);
 
   var el = function (id) { return document.getElementById(id); };
 
@@ -11,6 +26,7 @@
   var lastToken = { value: null, at: 0 };
   var current = null;
   var checkTimer = null;
+  var scanSequence = 0;
 
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
@@ -66,7 +82,6 @@
       el('barWho').hidden = false;
       el('signOut').hidden = false;
       touchActivity();
-      if (data.scanner.gate) el('gateSelect').value = data.scanner.gate;
       var saved = null;
       try { saved = localStorage.getItem('gate'); } catch (e) {}
       if (saved) el('gateSelect').value = saved;
@@ -88,7 +103,34 @@
     }
   }
 
+  /**
+   * config.js is the one file an operator has to edit, and it is the one most
+   * likely to be missing or left on its placeholders after a redeploy. Without
+   * this the page loaded, threw on CONFIG.CLIENT_ID, and showed an empty
+   * sign-in panel with nothing explaining why.
+   */
+  function configProblem() {
+    if (typeof CONFIG === 'undefined' || !CONFIG) {
+      return 'config.js did not load. Check it sits next to index.html and that ' +
+             'the page URL ends in a slash.';
+    }
+    if (!CONFIG.CLIENT_ID || CONFIG.CLIENT_ID.indexOf('PASTE_') === 0) {
+      return 'config.js still has the placeholder OAuth client ID. Fill in ' +
+             'CLIENT_ID and redeploy.';
+    }
+    if (!CONFIG.API_URL || CONFIG.API_URL.indexOf('PASTE_') !== -1) {
+      return 'config.js still has the placeholder API URL. Fill in API_URL with ' +
+             'the deployment URL ending in /exec.';
+    }
+    return null;
+  }
+
   function initGoogle() {
+    var problem = configProblem();
+    if (problem) {
+      notice('signinError', problem);
+      return;
+    }
     if (!window.google || !google.accounts || !google.accounts.id) {
       return window.setTimeout(initGoogle, 120);
     }
@@ -296,8 +338,10 @@
 
     enterCapturedState();
 
+    var scanSeq = ++scanSequence;
     post({ action: 'scan', token: token, gate: session.gate })
       .then(function (data) {
+        if (scanSeq !== scanSequence) return;   // superseded by a later scan
         leaveCapturedState();
         if (!data.ok) {
           notice('scanError', data.error || 'Could not check that pass.');
@@ -310,6 +354,7 @@
         touchActivity();
       })
       .catch(function (err) {
+        if (scanSeq !== scanSequence) return;
         leaveCapturedState();
         if (String(err.message) !== 'Signed out') {
           notice('scanError', err.message || 'The scan could not be checked.');
@@ -358,7 +403,17 @@
     el('verdictReason').textContent = allow ? '' : (data.reason || 'This pass is not valid.');
 
     renderTrack(allow, visitor, data.now);
-    renderFlag(data.warning);
+
+    // A pass with no photograph can only prove a booking exists, never that
+    // this is the person it was made for. Say so rather than quietly hiding
+    // the button and letting the screen read as a clean ALLOW.
+    var warnings = [];
+    if (data.warning) warnings.push(data.warning);
+    if (allow && !data.hasPhoto) {
+      warnings.push('No photograph on file. Do not admit on this pass alone — ' +
+                    'confirm with the host before letting them through.');
+    }
+    renderFlag(warnings.join(' '));
     renderFacts(data, visitor, allow);
 
     var photoBtn = el('showPhoto');
@@ -449,7 +504,6 @@
       var dt = document.createElement('dt');
       dt.textContent = row.label;
       var dd = document.createElement('dd');
-      if (row.mono) dd.className = 'mono';
       if (row.clamp) dd.className = 'clamp';
 
       if (row.tel) {
@@ -478,16 +532,25 @@
     var img = el('photoImg');
     var status = el('photoStatus');
 
+    // Capture what this request is for. The reply can arrive after the guard
+    // has tapped Scan next, at which point `current` is null — reading it in
+    // the callback threw, and a late reply could otherwise paint the previous
+    // visitor's photo over the next one.
+    var forToken = current.token;
+    var forName = (current.data.visitor && current.data.visitor.name) || '';
+    var stale = function () { return !current || current.token !== forToken; };
+
     img.hidden = true;
     img.removeAttribute('src');
     status.hidden = false;
     status.innerHTML = '<span class="spinner"></span>';
-    el('photoName').textContent = (current.data.visitor && current.data.visitor.name) || '';
+    el('photoName').textContent = forName;
     overlay.setAttribute('data-open', '');
     el('photoClose').focus();
 
-    post({ action: 'photo', token: current.token })
+    post({ action: 'photo', token: forToken })
       .then(function (data) {
+        if (stale()) return;
         if (!data.ok) { status.textContent = data.error || 'Photograph unavailable.'; return; }
         var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
         if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
@@ -496,10 +559,11 @@
         }
         img.onload = function () { status.hidden = true; img.hidden = false; };
         img.onerror = function () { status.textContent = 'Photograph could not be displayed.'; };
-        img.alt = 'Photograph of ' + ((current.data.visitor && current.data.visitor.name) || 'the visitor');
+        img.alt = 'Photograph of ' + (forName || 'the visitor');
         img.src = 'data:' + data.mime + ';base64,' + data.data;
       })
       .catch(function (err) {
+        if (stale()) return;
         if (String(err.message) !== 'Signed out') {
           status.textContent = err.message || 'Photograph could not be loaded.';
         }
@@ -577,11 +641,13 @@
 
   el('gateConfirm').addEventListener('click', function () {
     applyGate(el('gateSelect').value);
+    lastToken = { value: null, at: 0 };
     show('paneScan');
     startCamera();
   });
 
   el('gateCancel').addEventListener('click', function () {
+    lastToken = { value: null, at: 0 };
     show('paneScan');
     startCamera();
   });
@@ -591,6 +657,10 @@
   });
 
   el('scanNext').addEventListener('click', function () {
+    // The debounce stops one code firing twice while it is still in frame. A
+    // deliberate Scan next means the guard wants the next read, which may
+    // legitimately be the same visitor again.
+    lastToken = { value: null, at: 0 };
     clearVerdict();
     show('paneScan');
     startCamera();
@@ -610,6 +680,17 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) stopCamera();
     else if (el('paneScan').hasAttribute('data-active')) startCamera();
+  });
+
+  // visibilitychange does not fire on every route out of a page — bfcache
+  // navigation and some mobile browsers use pagehide. Without this the camera
+  // indicator can stay lit after the guard has navigated away.
+  window.addEventListener('pagehide', stopCamera);
+
+  // Restored from bfcache after a back-navigation: visibilitychange does not
+  // fire, so without this the scanner comes back with a dead camera.
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted && el('paneScan').hasAttribute('data-active')) startCamera();
   });
 
   initGoogle();
