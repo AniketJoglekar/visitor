@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#10162B">
+<meta name="referrer" content="no-referrer">
+<style id="framebust">html { display: none !important; }</style>
+<noscript><style>html { display: block !important; }</style></noscript>
+<script src="guard.js"></script>
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self' https://accounts.google.com;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data: https://ssl.gstatic.com https://www.gstatic.com https://lh3.googleusercontent.com;
+  connect-src https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com https://accounts.google.com;
+  frame-src https://accounts.google.com;
+  base-uri 'none';
+  form-action 'none';
+  object-src 'none'">
+<title>Visitor Pass Dashboard — IIT Tirupati</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#10162B; --surface:#1A2340; --raised:#232E51; --hairline:#2E3A5F;
+    --text:#E8ECF7; --muted:#8C97B5; --brass:#C9A227;
+    --allow:#17B278; --deny:#EE4038; --warn:#EFA01E; --idle:#6C7898;
+    --display:'Archivo',system-ui,sans-serif;
+    --body:'IBM Plex Sans',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin:0; min-height:100%; background:var(--ink); color:var(--text);
+    font-family:var(--body); -webkit-text-size-adjust:100%; }
+  button { font:inherit; color:inherit; border:0; background:none; cursor:pointer; }
+  :focus-visible { outline:2px solid var(--brass); outline-offset:3px; }
+
+  .bar { display:flex; align-items:center; gap:14px; padding:12px 20px;
+    border-bottom:1px solid var(--hairline); position:sticky; top:0; background:var(--ink); z-index:5; }
+  .bar__mark { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .bar__top { font-family:var(--display); font-variation-settings:'wdth' 118,'wght' 700;
+    font-size:11px; line-height:1; letter-spacing:.11em; text-transform:uppercase; color:var(--brass); }
+  .bar__sub { font-family:var(--display); font-variation-settings:'wdth' 104,'wght' 600;
+    font-size:15px; line-height:1.1; white-space:nowrap; }
+  .bar__who { margin-left:auto; font-size:13px; color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar__out { flex:0 0 auto; padding:7px 12px; border:1px solid var(--hairline);
+    border-radius:8px; font-size:13px; color:var(--muted); }
+
+  .wrap { max-width:1000px; margin:0 auto; padding:22px 20px 40px; }
+  h1 { font-family:var(--display); font-variation-settings:'wdth' 108,'wght' 700;
+    font-size:26px; margin:0 0 8px; }
+  .lede { color:var(--muted); font-size:14px; line-height:1.6; margin:0 0 22px; max-width:52ch; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; align-items:center; }
+  input[type="search"] { flex:1 1 240px; min-width:0; padding:11px 13px; background:var(--surface);
+    border:1px solid var(--hairline); border-radius:10px; color:var(--text); font:inherit; font-size:15px; }
+  .chip { padding:8px 13px; border:1px solid var(--hairline); border-radius:999px;
+    font-size:13px; color:var(--muted); background:var(--surface); white-space:nowrap; }
+  .chip[aria-pressed="true"] { color:var(--ink); background:var(--brass); border-color:var(--brass); font-weight:600; }
+
+  .count { font-size:13px; color:var(--muted); margin:0 0 12px; }
+
+  .row { display:grid; grid-template-columns:1fr auto; gap:10px 18px; align-items:center;
+    padding:14px 16px; border:1px solid var(--hairline); border-radius:12px;
+    background:var(--surface); margin-bottom:8px; }
+  .row__name { font-family:var(--display); font-variation-settings:'wdth' 100,'wght' 600;
+    font-size:17px; line-height:1.25; overflow-wrap:anywhere; }
+  .row__meta { font-size:13px; color:var(--muted); line-height:1.5; margin-top:3px; overflow-wrap:anywhere; }
+  .row__when { font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:5px; }
+  .row__side { display:flex; align-items:center; gap:10px; }
+
+  .pill { font-size:11px; letter-spacing:.06em; text-transform:uppercase; font-weight:600;
+    padding:4px 9px; border-radius:999px; white-space:nowrap; border:1px solid currentColor; }
+  .pill--active   { color:var(--allow); }
+  .pill--upcoming { color:var(--brass); }
+  .pill--expired  { color:var(--idle); }
+  .pill--revoked  { color:var(--deny); }
+  .pill--error    { color:var(--warn); }
+  .pill--other    { color:var(--warn); }
+
+  .act { padding:9px 14px; border-radius:9px; font-size:14px; font-weight:600;
+    border:1px solid var(--hairline); background:var(--raised); white-space:nowrap; }
+  .act--disapprove { color:#FFD9D7; border-color:#7A2B27; background:#3A1512; }
+  .act--approve { color:#0F2A1F; background:var(--allow); border-color:var(--allow); }
+  .act[disabled] { opacity:.5; cursor:default; }
+
+  .notice { padding:13px 15px; border-radius:10px; font-size:14px; line-height:1.5; margin-bottom:16px; }
+  .notice--bad { background:#47100D; border:1px solid var(--deny); }
+  .notice--ok { background:#063D2A; border:1px solid var(--allow); }
+
+  .btn { display:block; width:100%; max-width:300px; padding:14px 18px; border-radius:11px;
+    background:var(--brass); color:#1C1503; font-weight:600; font-size:16px; text-align:center; }
+
+  .spinner { width:16px; height:16px; border:2px solid rgba(232,236,247,.28);
+    border-top-color:var(--text); border-radius:50%; display:inline-block;
+    vertical-align:-3px; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration:2.4s; } }
+
+  @media (max-width: 560px) {
+    .row { grid-template-columns:1fr; }
+    .row__side { justify-content:space-between; }
+  }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p style="padding:24px;font:16px/1.5 system-ui,sans-serif;color:#E8ECF7">
+    This dashboard needs JavaScript. Enable it, then reload.
+  </p>
+</noscript>
+
+<header class="bar">
+  <span class="bar__mark">
+    <span class="bar__top">IIT Tirupati</span>
+    <span class="bar__sub">Visitor Pass Dashboard</span>
+  </span>
+  <span class="bar__who" id="barWho" hidden></span>
+  <button class="bar__out" id="signOut" hidden>Sign out</button>
+</header>
+
+<main class="wrap">
+  <section id="paneSignin">
+    <h1>Sign in</h1>
+    <p class="lede">Only accounts on the Admins list can approve or disapprove a
+       pass. Gate staff accounts cannot.</p>
+    <div id="gsiButton"></div>
+    <p class="notice notice--bad" id="signinError" hidden></p>
+  </section>
+
+  <section id="paneList" hidden>
+    <p class="notice notice--bad" id="listError" hidden></p>
+    <p class="notice notice--ok" id="listOk" hidden></p>
+
+    <div class="controls">
+      <input type="search" id="search" placeholder="Search visitor, host or affiliation" autocomplete="off">
+      <button class="chip" id="fAll" aria-pressed="true">All</button>
+      <button class="chip" id="fActive" aria-pressed="false">Active</button>
+      <button class="chip" id="fUpcoming" aria-pressed="false">Upcoming</button>
+      <button class="chip" id="fExpired" aria-pressed="false">Expired</button>
+      <button class="chip" id="fRevoked" aria-pressed="false">Revoked</button>
+      <button class="chip" id="refresh">Refresh</button>
+    </div>
+
+    <p class="count" id="count"></p>
+    <div id="list"></div>
+  </section>
+</main>
+
+<script src="config.js"></script>
+<script src="dashboard.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</body>
+</html>
