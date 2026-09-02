@@ -7,7 +7,7 @@
  * can be delivered. That leaves a script check as the only available defence.
  *
  * Why it matters: a framed copy of the scanner lets an attacker overlay their
- * own controls on a signed-in gate session — an invisible Show photo under
+ * own controls on a signed-in gate session — an invisible control under
  * something the guard wants to tap, or a Sign out mid-shift so later scans land
  * under the wrong identity.
  *

@@ -408,11 +408,11 @@
   .verdict__word {
     font-family: var(--display);
     font-variation-settings: 'wdth' 125, 'wght' 800;
-    font-size: clamp(34px, 8.6vh, 62px);
-    line-height: 0.9;
+    font-size: clamp(26px, 5.4vh, 40px);
+    line-height: 0.95;
     letter-spacing: -0.02em;
     margin: 0;
-    min-height: 0.9em;      /* keeps layout steady between states */
+    min-height: 0.95em;     /* keeps layout steady between states */
     color: var(--deny);
   }
 
@@ -421,9 +421,9 @@
   .verdict__name {
     font-family: var(--display);
     font-variation-settings: 'wdth' 100, 'wght' 600;
-    font-size: clamp(19px, 3.6vh, 28px);
+    font-size: clamp(18px, 3.2vh, 25px);
     line-height: 1.2;
-    margin: clamp(7px, 1.6vh, 14px) 0 0;
+    margin: clamp(6px, 1.3vh, 11px) 0 0;
     overflow-wrap: anywhere;
   }
 
@@ -458,6 +458,50 @@
     color: var(--text);
     opacity: 0.9;
   }
+
+  /* Photograph sits inside the verdict panel, beside the name, so the guard
+     sees the face and the decision in one glance without pressing anything. */
+  .verdict__head {
+    display: flex;
+    align-items: flex-start;
+    gap: clamp(12px, 2.4vw, 18px);
+  }
+
+  .verdict__lines { min-width: 0; flex: 1 1 auto; }
+
+  .verdict__photo {
+    flex: 0 0 auto;
+    width: clamp(88px, 17vh, 148px);
+    aspect-ratio: 3 / 4;
+    padding: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #05080F;
+    border: 1px solid rgba(232, 236, 247, 0.22);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .verdict__photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .verdict__photo[data-empty] img { display: none; }
+
+  .verdict__photo small {
+    font-size: 11px;
+    line-height: 1.3;
+    color: var(--muted);
+    text-align: center;
+    padding: 6px;
+  }
+
+  .verdict__photo[data-loaded] small { display: none; }
 
   /* signature element: where "now" sits inside the visit window */
 
@@ -530,7 +574,8 @@
   .facts:empty { display: none; }
 
   .facts {
-    margin: 0;
+    margin-top: auto;        /* sit with the button, not under the banner */
+    margin-bottom: 0;
     padding: clamp(8px, 2vh, 18px) 20px 2px;
     display: grid;
     grid-template-columns: minmax(76px, auto) 1fr;
@@ -562,7 +607,6 @@
   }
 
   .actions {
-    margin-top: auto;
     padding: clamp(8px, 1.6vh, 14px) 20px clamp(10px, 2vh, 18px);
   }
 
@@ -691,7 +735,9 @@
 
 <!-- Sign in -->
 <section class="pane pad" id="paneSignin" data-active>
-  <h2>Authorized personnel Only</h2>
+  <h1>Sign in to scan</h1>
+  <p class="lede">Visitor details are only shown to staff on the authorised list.
+     Use the Google account GAC registered for you.</p>
   <div id="gsiButton"></div>
   <p class="notice" id="signinError" hidden></p>
 </section>
@@ -734,11 +780,19 @@
 <section class="pane verdict" id="paneVerdict">
   <div class="verdict__banner">
     <div class="meter" id="meter" aria-hidden="true"></div>
-    <p class="verdict__word" id="verdictWord"></p>
-    <p class="verdict__name" id="verdictName"></p>
-    <p class="verdict__type" id="verdictType"></p>
-    <p class="verdict__affil" id="verdictAffil"></p>
-    <p class="verdict__reason" id="verdictReason"></p>
+    <div class="verdict__head">
+      <button class="verdict__photo" id="verdictPhoto" data-empty hidden>
+        <img id="verdictPhotoImg" alt="">
+        <small id="verdictPhotoNote">Loading photo…</small>
+      </button>
+      <div class="verdict__lines">
+        <p class="verdict__word" id="verdictWord"></p>
+        <p class="verdict__name" id="verdictName"></p>
+        <p class="verdict__type" id="verdictType"></p>
+        <p class="verdict__affil" id="verdictAffil"></p>
+        <p class="verdict__reason" id="verdictReason"></p>
+      </div>
+    </div>
     <div class="track" id="track" hidden>
       <div class="track__rail">
         <div class="track__fill" id="trackFill"></div>
@@ -760,8 +814,7 @@
   <dl class="facts" id="verdictFacts"></dl>
 
   <div class="actions">
-    <button class="btn btn--primary" id="showPhoto" hidden>Show photo</button>
-    <button class="btn" id="scanNext">Scan next visitor</button>
+    <button class="btn btn--primary" id="scanNext">Scan next visitor</button>
   </div>
 </section>
 

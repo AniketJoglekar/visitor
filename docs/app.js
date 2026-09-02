@@ -27,6 +27,7 @@
   var current = null;
   var checkTimer = null;
   var scanSequence = 0;
+  var photoCache = { token: null, dataUri: null };
 
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
@@ -410,18 +411,74 @@
     var warnings = [];
     if (data.warning) warnings.push(data.warning);
     if (allow && !data.hasPhoto) {
-      warnings.push('No photograph on file. Do not admit on this pass alone — ' +
-                    'confirm with the host before letting them through.');
+      warnings.push('No photograph on file for this pass. Do not admit on it ' +
+                    'alone — confirm with the host before letting them through.');
     }
     renderFlag(warnings.join(' '));
     renderFacts(data, visitor, allow);
 
-    var photoBtn = el('showPhoto');
-    photoBtn.hidden = !data.hasPhoto;
-    photoBtn.textContent = 'Show photo';
+    showInlinePhoto(data.hasPhoto);
 
     startMeter();
     pane.scrollTop = 0;
+  }
+
+  /**
+   * Loads the photograph straight into the verdict panel. It used to sit behind
+   * a button, which meant the guard could clear a visitor without ever seeing
+   * the face — the one check the whole system rests on.
+   */
+  function showInlinePhoto(hasPhoto) {
+    var tile = el('verdictPhoto');
+    var img = el('verdictPhotoImg');
+    var note = el('verdictPhotoNote');
+
+    img.removeAttribute('src');
+    tile.removeAttribute('data-loaded');
+    tile.setAttribute('data-empty', '');
+
+    if (!hasPhoto || !current) {
+      tile.hidden = true;
+      return;
+    }
+
+    tile.hidden = false;
+    note.textContent = 'Loading photo\u2026';
+    img.alt = 'Photograph of ' + ((current.data.visitor && current.data.visitor.name) || 'the visitor');
+
+    var forToken = current.token;
+    fetchPhoto(forToken)
+      .then(function (dataUri) {
+        if (!current || current.token !== forToken) return;
+        img.onload = function () {
+          tile.removeAttribute('data-empty');
+          tile.setAttribute('data-loaded', '');
+        };
+        img.onerror = function () { note.textContent = 'Photo unreadable'; };
+        img.src = dataUri;
+      })
+      .catch(function (err) {
+        if (!current || current.token !== forToken) return;
+        if (String(err.message) === 'Signed out') return;
+        note.textContent = err.message && err.message.length < 40 ? err.message : 'Photo unavailable';
+      });
+  }
+
+  /** Fetches once per pass; the full-screen view reuses the same bytes. */
+  function fetchPhoto(token) {
+    if (photoCache.token === token && photoCache.dataUri) {
+      return Promise.resolve(photoCache.dataUri);
+    }
+    return post({ action: 'photo', token: token }).then(function (data) {
+      if (!data.ok) throw new Error(data.error || 'Photograph unavailable.');
+      var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+      if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
+        throw new Error('Photograph rejected as unreadable.');
+      }
+      var uri = 'data:' + data.mime + ';base64,' + data.data;
+      photoCache = { token: token, dataUri: uri };
+      return uri;
+    });
   }
 
   function startMeter() {
@@ -449,7 +506,9 @@
     el('verdictFacts').innerHTML = '';
     el('verdictFlag').hidden = true;
     el('track').hidden = true;
-    el('showPhoto').hidden = true;
+    el('verdictPhoto').hidden = true;
+    el('verdictPhotoImg').removeAttribute('src');
+    photoCache = { token: null, dataUri: null };
     el('paneVerdict').classList.remove('verdict--allow');
   }
 
@@ -491,8 +550,9 @@
     // reachable without scrolling.
     var rows = [];
     if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose, clamp: true });
-    if (visitor.host) rows.push({ label: 'Host', value: visitor.host });
-    if (visitor.hostPhone) rows.push({ label: 'Phone', value: visitor.hostPhone, tel: true });
+    if (visitor.host || visitor.hostPhone) {
+      rows.push({ label: 'Host', value: visitor.host || '', tel: visitor.hostPhone || '' });
+    }
     if (!allow && visitor.validFrom) {
       rows.push({ label: 'Window',
                   value: formatTime(visitor.validFrom) + ' \u2192 ' +
@@ -507,11 +567,13 @@
       if (row.clamp) dd.className = 'clamp';
 
       if (row.tel) {
-        // Tappable so the gate can call the host without retyping. The server
-        // has already stripped this to dialable characters only.
+        // Name and number share one line; the number stays tappable so the gate
+        // can call the host without retyping. The server has already stripped it
+        // to dialable characters only.
+        if (row.value) dd.appendChild(document.createTextNode(row.value + '  \u00b7  '));
         var link = document.createElement('a');
-        link.href = 'tel:' + String(row.value).replace(/[^0-9+]/g, '');
-        link.textContent = row.value;
+        link.href = 'tel:' + String(row.tel).replace(/[^0-9+]/g, '');
+        link.textContent = row.tel;
         dd.appendChild(link);
       } else {
         dd.textContent = row.value;
@@ -532,13 +594,8 @@
     var img = el('photoImg');
     var status = el('photoStatus');
 
-    // Capture what this request is for. The reply can arrive after the guard
-    // has tapped Scan next, at which point `current` is null — reading it in
-    // the callback threw, and a late reply could otherwise paint the previous
-    // visitor's photo over the next one.
     var forToken = current.token;
     var forName = (current.data.visitor && current.data.visitor.name) || '';
-    var stale = function () { return !current || current.token !== forToken; };
 
     img.hidden = true;
     img.removeAttribute('src');
@@ -548,22 +605,16 @@
     overlay.setAttribute('data-open', '');
     el('photoClose').focus();
 
-    post({ action: 'photo', token: forToken })
-      .then(function (data) {
-        if (stale()) return;
-        if (!data.ok) { status.textContent = data.error || 'Photograph unavailable.'; return; }
-        var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-        if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
-          status.textContent = 'Photograph rejected as unreadable. Contact GAC.';
-          return;
-        }
+    fetchPhoto(forToken)
+      .then(function (dataUri) {
+        if (!current || current.token !== forToken) return;
         img.onload = function () { status.hidden = true; img.hidden = false; };
         img.onerror = function () { status.textContent = 'Photograph could not be displayed.'; };
         img.alt = 'Photograph of ' + (forName || 'the visitor');
-        img.src = 'data:' + data.mime + ';base64,' + data.data;
+        img.src = dataUri;
       })
       .catch(function (err) {
-        if (stale()) return;
+        if (!current || current.token !== forToken) return;
         if (String(err.message) !== 'Signed out') {
           status.textContent = err.message || 'Photograph could not be loaded.';
         }
@@ -579,7 +630,7 @@
     img.removeAttribute('src');
     // Only pull focus back if the overlay was actually open — clearVerdict()
     // calls this defensively and should not move focus.
-    if (wasOpen && !el('showPhoto').hidden) el('showPhoto').focus();
+    if (wasOpen && !el('verdictPhoto').hidden) el('verdictPhoto').focus();
   }
 
   // -------------------------------------------------------------------------
@@ -667,7 +718,7 @@
   });
 
   el('signOut').addEventListener('click', signOut);
-  el('showPhoto').addEventListener('click', openPhoto);
+  el('verdictPhoto').addEventListener('click', openPhoto);
   el('photoClose').addEventListener('click', closePhoto);
   el('photoOverlay').addEventListener('click', function (event) {
     if (event.target === el('photoOverlay') || event.target.id === 'photoImg') closePhoto();
