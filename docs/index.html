@@ -408,11 +408,11 @@
   .verdict__word {
     font-family: var(--display);
     font-variation-settings: 'wdth' 125, 'wght' 800;
-    font-size: clamp(26px, 5.4vh, 40px);
-    line-height: 0.95;
-    letter-spacing: -0.02em;
+    font-size: clamp(19px, 3.8vh, 29px);
+    line-height: 1;
+    letter-spacing: 0.01em;
     margin: 0;
-    min-height: 0.95em;     /* keeps layout steady between states */
+    min-height: 1em;        /* keeps layout steady between states */
     color: var(--deny);
   }
 
@@ -463,15 +463,23 @@
      sees the face and the decision in one glance without pressing anything. */
   .verdict__head {
     display: flex;
-    align-items: flex-start;
-    gap: clamp(12px, 2.4vw, 18px);
+    align-items: stretch;
+    gap: clamp(18px, 5vw, 32px);
   }
 
-  .verdict__lines { min-width: 0; flex: 1 1 auto; }
+  /* The photo is now the taller element, so the text is centred against it
+     rather than top-aligned with a gap trailing beneath. */
+  .verdict__lines {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
 
   .verdict__photo {
     flex: 0 0 auto;
-    width: clamp(88px, 17vh, 148px);
+    width: clamp(112px, 23vh, 196px);
     aspect-ratio: 3 / 4;
     padding: 0;
     border-radius: 10px;
@@ -574,8 +582,7 @@
   .facts:empty { display: none; }
 
   .facts {
-    margin-top: auto;        /* sit with the button, not under the banner */
-    margin-bottom: 0;
+    margin: 0;               /* hug the verdict panel */
     padding: clamp(8px, 2vh, 18px) 20px 2px;
     display: grid;
     grid-template-columns: minmax(76px, auto) 1fr;
@@ -607,6 +614,7 @@
   }
 
   .actions {
+    margin-top: auto;        /* spare height collects here, below the detail */
     padding: clamp(8px, 1.6vh, 14px) 20px clamp(10px, 2vh, 18px);
   }
 
