@@ -195,13 +195,29 @@
     margin: 0 0 8px;
   }
 
-  .lede {
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 1.6;
-    margin: 0 0 22px;
-    max-width: 44ch;
+  h2 {
+    font-family: var(--display);
+    font-variation-settings: 'wdth' 112, 'wght' 700;
+    font-size: clamp(19px, 4.2vw, 23px);
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    margin: 0;
   }
+
+  .signin { align-items: center; text-align: center; }
+
+  /* Two auto margins split the spare height: the heading and button sit near
+     the middle, the dashboard link settles at the bottom. */
+  .signin__mid {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+  }
+
+  .signin .sidelink { margin-top: auto; margin-bottom: 2px; }
 
   label.field {
     display: block;
@@ -620,6 +636,26 @@
 
   .btn + .btn { margin-top: 10px; }
 
+  /* Secondary on purpose. Gate staff have no use for the dashboard and are
+     refused by it; this is here for the security head who opens the scanner
+     URL out of habit. */
+  .sidelink {
+    display: inline-block;
+    margin-top: 26px;
+    align-self: center;
+    padding: 11px 16px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .sidelink:hover,
+  .sidelink:focus-visible { color: var(--text); border-color: var(--brass); }
+
+  .sidelink span { color: var(--brass); }
+
   /* ---------- photo overlay ---------- */
 
   .photo {
@@ -742,12 +778,13 @@
 </div>
 
 <!-- Sign in -->
-<section class="pane pad" id="paneSignin" data-active>
-  <h1>Sign in to scan</h1>
-  <p class="lede">Visitor details are only shown to staff on the authorised list.
-     Use the Google account GAC registered for you.</p>
-  <div id="gsiButton"></div>
-  <p class="notice" id="signinError" hidden></p>
+<section class="pane pad signin" id="paneSignin" data-active>
+  <div class="signin__mid">
+    <h2>Authorized Personnel Only</h2>
+    <div id="gsiButton"></div>
+    <p class="notice" id="signinError" hidden></p>
+  </div>
+  <a class="sidelink" href="dashboard.html">Pass dashboard <span>&rarr;</span></a>
 </section>
 
 <!-- Choose gate -->
