@@ -20,26 +20,26 @@
  */
 (function () {
   'use strict';
-
+ 
   function reveal() {
     var gate = document.getElementById('framebust');
     if (gate && gate.parentNode) gate.parentNode.removeChild(gate);
   }
-
+ 
   if (window.top === window.self) {
     reveal();
     return;
   }
-
+ 
   window.__FRAMED__ = true;
-
+ 
   try {
     window.top.location = window.self.location;
   } catch (e) {
     // Cross-origin or sandboxed parent refused the navigation. Fall through and
     // show the notice instead of the scanner.
   }
-
+ 
   document.addEventListener('DOMContentLoaded', function () {
     reveal();
     document.body.textContent =
