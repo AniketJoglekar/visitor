@@ -133,44 +133,6 @@
     text-overflow: ellipsis;
   }
 
-  .gatestrip {
-    position: relative;
-    flex: 0 0 auto;
-    padding: clamp(4px, 1.1vh, 10px) 84px;
-    text-align: center;
-    border-bottom: 1px solid var(--hairline);
-    background: var(--surface);
-  }
-
-  .gatestrip__label {
-    font-size: 10px;
-    letter-spacing: 0.13em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-right: 7px;
-  }
-
-  .gatestrip__name {
-    font-family: var(--display);
-    font-variation-settings: 'wdth' 106, 'wght' 600;
-    font-size: 16px;
-    line-height: 1.35;
-    color: var(--text);
-  }
-
-  .gatestrip__change {
-    position: absolute;
-    top: 50%;
-    right: 12px;
-    transform: translateY(-50%);
-    padding: 6px 11px;
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    font-size: 12px;
-    color: var(--muted);
-    background: var(--ink);
-  }
-
   .bar__out {
     flex: 0 0 auto;
     padding: 7px 12px;
@@ -218,26 +180,6 @@
   }
 
   .signin .sidelink { margin-top: auto; margin-bottom: 2px; }
-
-  label.field {
-    display: block;
-    font-size: 12px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin: 0 0 7px;
-  }
-
-  select {
-    width: 100%;
-    padding: 13px 14px;
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    border-radius: 10px;
-    color: var(--text);
-    font-family: var(--body);
-    font-size: 16px;
-  }
 
   .btn {
     display: block;
@@ -771,12 +713,6 @@
   <button class="bar__out" id="signOut" hidden>Sign out</button>
 </header>
 
-<div class="gatestrip" id="gateStrip" hidden>
-  <span class="gatestrip__label">Gate</span>
-  <span class="gatestrip__name" id="gateStripName"></span>
-  <button class="gatestrip__change" id="gateChange">Change</button>
-</div>
-
 <!-- Sign in -->
 <section class="pane pad signin" id="paneSignin" data-active>
   <div class="signin__mid">
@@ -785,20 +721,6 @@
     <p class="notice" id="signinError" hidden></p>
   </div>
   <a class="sidelink" href="dashboard.html">Pass dashboard <span>&rarr;</span></a>
-</section>
-
-<!-- Choose gate -->
-<section class="pane pad" id="paneGate">
-  <h1 id="gateHeading">Which gate?</h1>
-  <label class="field" for="gateSelect">Post</label>
-  <select id="gateSelect">
-    <option value="Main Gate">Main Gate</option>
-    <option value="South Gate">South Gate</option>
-    <option value="Faculty Quarter Gate">Faculty Quarter Gate</option>
-  </select>
-  <div style="height:20px"></div>
-  <button class="btn btn--primary" id="gateConfirm">Start scanning</button>
-  <button class="btn" id="gateCancel" hidden>Cancel</button>
 </section>
 
 <!-- Camera -->

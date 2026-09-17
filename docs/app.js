@@ -21,7 +21,7 @@
 
   var el = function (id) { return document.getElementById(id); };
 
-  var session = { idToken: null, expiresAt: 0, scanner: null, gate: null };
+  var session = { idToken: null, expiresAt: 0, scanner: null };
   var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false };
   var lastToken = { value: null, at: 0 };
   var current = null;
@@ -50,7 +50,7 @@
   // Panes
   // -------------------------------------------------------------------------
 
-  var PANES = ['paneSignin', 'paneGate', 'paneScan', 'paneVerdict'];
+  var PANES = ['paneSignin', 'paneScan', 'paneVerdict'];
 
   function show(id) {
     PANES.forEach(function (p) {
@@ -83,13 +83,8 @@
       el('barWho').hidden = false;
       el('signOut').hidden = false;
       touchActivity();
-      var saved = null;
-      try { saved = localStorage.getItem('gate'); } catch (e) {}
-      if (saved) el('gateSelect').value = saved;
-      el('gateCancel').hidden = true;
-      el('gateConfirm').textContent = 'Start scanning';
-      el('gateHeading').textContent = 'Which gate?';
-      show('paneGate');
+      show('paneScan');
+      startCamera();
     }).catch(function (err) {
       notice('signinError', String(err.message || err));
     });
@@ -158,7 +153,6 @@
     clearVerdict();
     stopCamera();
     el('barWho').hidden = true;
-    el('gateStrip').hidden = true;
     el('signOut').hidden = true;
     leaveCapturedState();
     show('paneSignin');
@@ -181,10 +175,17 @@
   // API
   // -------------------------------------------------------------------------
 
+  /** Error marker for "the session is over", independent of any message text. */
+  function signedOut(message) {
+    var err = new Error(message);
+    err.signedOut = true;
+    return err;
+  }
+
   function post(payload) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
-      return Promise.reject(new Error('Signed out'));
+      return Promise.reject(signedOut('Signed out'));
     }
     payload.idToken = session.idToken;
     // text/plain keeps this a simple request, so the browser skips the CORS
@@ -223,7 +224,12 @@
       }
       if (data && data.authError) {
         requireSignIn(data.error);
-        throw new Error(data.error);
+        // Marked, not matched on text. This used to throw a plain Error whose
+        // message was the server's, so callers compared it against the string
+        // 'Signed out', decided it was an ordinary failure, and carried on —
+        // the scanner restarted its camera on a signed-out session and replaced
+        // the server's accurate message with a generic one.
+        throw signedOut(data.error);
       }
       return data;
     });
@@ -303,7 +309,13 @@
         );
         var image = camera.ctx.getImageData(0, 0, size, size);
         var found = camera.decode(image.data, size, size, { inversionAttempts: 'dontInvert' });
-        if (found && found.data) onCode(found.data.trim());
+        if (found && found.data) {
+          onCode(found.data.trim());
+        } else {
+          // The code has left the frame, so the next sighting of it is a
+          // deliberate new presentation and is accepted at once.
+          lastToken = { value: null, at: 0 };
+        }
       }
     }
     camera.raf = requestAnimationFrame(tick);
@@ -340,7 +352,7 @@
     enterCapturedState();
 
     var scanSeq = ++scanSequence;
-    post({ action: 'scan', token: token, gate: session.gate })
+    post({ action: 'scan', token: token })
       .then(function (data) {
         if (scanSeq !== scanSequence) return;   // superseded by a later scan
         leaveCapturedState();
@@ -357,7 +369,7 @@
       .catch(function (err) {
         if (scanSeq !== scanSequence) return;
         leaveCapturedState();
-        if (String(err.message) !== 'Signed out') {
+        if (!err.signedOut) {
           notice('scanError', err.message || 'The scan could not be checked.');
           resumeScanning();
         }
@@ -459,7 +471,7 @@
       })
       .catch(function (err) {
         if (!current || current.token !== forToken) return;
-        if (String(err.message) === 'Signed out') return;
+        if (err.signedOut) return;
         note.textContent = err.message && err.message.length < 40 ? err.message : 'Photo unavailable';
       });
   }
@@ -629,7 +641,7 @@
       })
       .catch(function (err) {
         if (!current || current.token !== forToken) return;
-        if (String(err.message) !== 'Signed out') {
+        if (!err.signedOut) {
           status.textContent = err.message || 'Photograph could not be loaded.';
         }
       });
@@ -685,47 +697,11 @@
   // Wiring
   // -------------------------------------------------------------------------
 
-  function openGatePicker(isChange) {
-    // Changing gate mid-shift must not require signing out — a guard who
-    // picked the wrong post should be able to correct it in two taps, and the
-    // gate is what the scan log records.
-    el('gateCancel').hidden = !isChange;
-    el('gateConfirm').textContent = isChange ? 'Use this gate' : 'Start scanning';
-    el('gateHeading').textContent = isChange ? 'Change gate' : 'Which gate?';
-    if (session.gate) el('gateSelect').value = session.gate;
-    clearVerdict();
-    show('paneGate');
-  }
-
-  function applyGate(gate) {
-    session.gate = gate;
-    try { localStorage.setItem('gate', gate); } catch (e) {}
-    el('gateStripName').textContent = gate;
-    el('gateStrip').hidden = false;
-  }
-
-  el('gateConfirm').addEventListener('click', function () {
-    applyGate(el('gateSelect').value);
-    lastToken = { value: null, at: 0 };
-    show('paneScan');
-    startCamera();
-  });
-
-  el('gateCancel').addEventListener('click', function () {
-    lastToken = { value: null, at: 0 };
-    show('paneScan');
-    startCamera();
-  });
-
-  el('gateChange').addEventListener('click', function () {
-    openGatePicker(true);
-  });
-
   el('scanNext').addEventListener('click', function () {
-    // The debounce stops one code firing twice while it is still in frame. A
-    // deliberate Scan next means the guard wants the next read, which may
-    // legitimately be the same visitor again.
-    lastToken = { value: null, at: 0 };
+    // Deliberately NOT clearing lastToken here. The pass is normally still in
+    // front of the camera, and clearing it re-read the same code on the next
+    // frame and put the same verdict straight back on screen. tick() clears it
+    // as soon as the code leaves the frame instead.
     clearVerdict();
     show('paneScan');
     startCamera();
