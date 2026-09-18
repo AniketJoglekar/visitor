@@ -59,6 +59,24 @@
   // Two retries after the first attempt. Each carries the same request ID, so
   // the server replays its stored verdict rather than admitting the visitor
   // again. Three lost replies in a row is a real outage, not a blip.
+  // Retrying is bounded by TIME, not by a count of attempts. The server stores
+  // each verdict against its request ID for CONFIG.SCAN_REPLAY_SECONDS (120) and
+  // replays it for a repeat, so asking again inside that window costs a round
+  // trip and cannot record a second entry.
+  //
+  // Past that window the stored verdict is gone and the same request ID would
+  // be executed afresh — a second ScanLog row and a second entry counted for one
+  // visitor. THAT is why this cannot simply retry forever. 60 seconds leaves
+  // ample margin inside the 120, and the deadline is measured from the first
+  // attempt, not from the last.
+  var SCAN_REPLAY_WINDOW_MS = 120 * 1000;   // must match CONFIG.SCAN_REPLAY_SECONDS
+  var SCAN_RETRY_DEADLINE_MS = 60 * 1000;
+  // Pauses between attempts, in order. Escalating so a persistent outage backs
+  // off instead of hammering. A hard attempt ceiling sits alongside the time
+  // deadline: a fault that fails instantly would otherwise fit hundreds of
+  // requests into the window and trip RATE_LIMIT_PER_MIN.
+  var RETRY_GAP_MS = [1000, 2000, 3000, 5000, 8000];
+  var SCAN_MAX_ATTEMPTS = 8;
   var SCAN_RETRIES = 2;
 
   // Retries for requests that change nothing and so are safe to repeat.
@@ -290,6 +308,18 @@
    * retry and left sign-in without one, so a guard could be locked out at the
    * start of a shift by a fault the scanner would have shrugged off.
    */
+  /**
+   * Timing of the most recent reply. Kept so a failure message can say where the
+   * time went rather than only how much of it there was.
+   */
+  var lastTiming = null;
+
+  function describeTiming() {
+    if (!lastTiming || lastTiming.serverMs === null) return '';
+    return 'Last reply: script took ' + (lastTiming.serverMs / 1000).toFixed(1) +
+           's, delivery took ' + (lastTiming.deliveryMs / 1000).toFixed(1) + 's.';
+  }
+
   function post(payload, retries, attemptNo) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
@@ -303,6 +333,7 @@
 
     // A hung request used to hang the gate with no upper bound and no feedback,
     // so "it takes forever" was indistinguishable from "it failed".
+    var sentAt = Date.now();
     var controller = (typeof AbortController === 'function') ? new AbortController() : null;
     var timedOut = false;
     var timer = controller ? window.setTimeout(function () {
@@ -370,6 +401,17 @@
       try {
         Object.defineProperty(data, '__raw', { value: body, enumerable: false });
       } catch (ignored) { /* frozen or non-object reply; the checks below still run */ }
+
+      // Split the round trip into the part the script spent and the part spent
+      // getting the answer back. Until now both were one opaque number, which is
+      // why "the scan is slow" could not be pinned on either side.
+      var roundTripMs = Date.now() - sentAt;
+      lastTiming = {
+        roundTripMs: roundTripMs,
+        serverMs: (typeof data.serverMs === 'number') ? data.serverMs : null,
+        deliveryMs: (typeof data.serverMs === 'number') ? roundTripMs - data.serverMs : null,
+        action: payload.action
+      };
       if (data && data.authError) {
         requireSignIn(data.error);
         // Marked, not matched on text. This used to throw a plain Error whose
@@ -381,7 +423,7 @@
       }
       return data;
     }).catch(function (err) {
-      if (err.signedOut || budget <= 0) throw err;
+      if (err.signedOut || err.rateLimited || budget <= 0) throw err;
       return post(payload, budget - 1, attemptIndex + 1);
     });
   }
@@ -524,19 +566,57 @@
     // guard waiting scan+photo and waiting max(scan, photo).
     prefetchPhoto(token);
 
-    function attempt(triesLeft) {
-      var attemptNo = SCAN_RETRIES - triesLeft;
-      return post({ action: 'scan', token: token, requestId: requestId }, 0, attemptNo)
-        .catch(function (err) {
-          if (err.signedOut || triesLeft <= 0) throw err;
-          el('scanHint').textContent = 'No answer yet \u2014 asking again\u2026';
-          return attempt(triesLeft - 1);
-        });
+    var startedAt = Date.now();
+    var attemptNo = 0;
+    var givenUp = false;
+
+    el('checkingStop').hidden = true;
+    el('checkingStop').onclick = function () {
+      givenUp = true;
+      el('checkingStop').hidden = true;
+    };
+
+    function elapsed() { return Date.now() - startedAt; }
+
+    /**
+     * Pause before the next attempt. Both retry paths use this — the one for
+     * replies that never arrive and the one for replies that arrive malformed.
+     * The malformed path originally retried with no pause at all, which meant a
+     * reply that failed instantly fitted the whole budget into a few
+     * milliseconds and hammered the server.
+     */
+    function afterGap(fn) {
+      return new Promise(function (resolve) {
+        window.setTimeout(resolve, RETRY_GAP_MS[
+          Math.min(attemptNo - 1, RETRY_GAP_MS.length - 1)]);
+      }).then(fn);
     }
 
-    // Budget for replies that arrive but are malformed, separate from the
-    // budget for replies that do not arrive at all.
-    var shapeRetries = SCAN_RETRIES;
+    /**
+     * Keeps asking until the replay window is nearly spent, rather than giving
+     * up after a fixed number of tries. Each repeat carries the same request ID,
+     * so the server replays the verdict it already reached.
+     */
+    function attempt() {
+      attemptNo++;
+      return post({ action: 'scan', token: token, requestId: requestId }, 0, attemptNo - 1)
+        .catch(function (err) {
+          if (err.signedOut || err.rateLimited || givenUp) throw err;
+          if (elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
+          if (attemptNo >= SCAN_MAX_ATTEMPTS) throw err;
+
+          el('checkingStop').hidden = false;
+          el('checkingNote').textContent =
+            'Still asking \u2014 attempt ' + (attemptNo + 1) + ', ' +
+            Math.round(elapsed() / 1000) + 's. The pass has already been ' +
+            'checked; waiting for the answer to come back.';
+
+          return afterGap(function () {
+            if (givenUp || elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
+            return attempt();
+          });
+        });
+    }
 
     function handle(data) {
         if (scanSeq !== scanSequence) return;   // superseded by a later scan
@@ -580,17 +660,25 @@
           // ID is sent again, and the server replays its stored verdict rather
           // than recording a second entry. Without that guarantee a retry would
           // have added a phantom admission every time.
-          if (shapeRetries > 0) {
-            shapeRetries--;
-            el('scanHint').textContent = 'Reply was incomplete \u2014 asking again\u2026';
-            attempt(shapeRetries).then(handle, fail);
+          // The attempt ceiling must be checked HERE too. A malformed reply is
+          // a *successful* POST, so the ceiling inside attempt()'s catch never
+          // fires on this path — and with a reply that arrives quickly, the
+          // deadline alone allows an unbounded loop.
+          if (!givenUp && attemptNo < SCAN_MAX_ATTEMPTS &&
+              elapsed() < SCAN_RETRY_DEADLINE_MS) {
+            el('checkingStop').hidden = false;
+            el('checkingNote').textContent =
+              'Reply arrived incomplete \u2014 still asking, attempt ' +
+              (attemptNo + 1) + ', ' + Math.round(elapsed() / 1000) + 's.';
+            enterCapturedState();
+            el('checkingStop').hidden = false;
+            afterGap(function () {
+              if (givenUp) { giveUp(shapeFault); return; }
+              return attempt().then(handle, fail);
+            });
             return;
           }
-          notice('scanError', 'The server sent an incomplete reply (' + shapeFault +
-                 '). Do not admit on this \u2014 the scan may already have been recorded. ' +
-                 'Rescan, and report this if it repeats.\n\nReceived: ' +
-                 describeReply(data));
-          resumeScanning();
+          giveUp(shapeFault + '. Received: ' + describeReply(data));
           return;
         }
 
@@ -599,16 +687,44 @@
         touchActivity();
     }
 
-    function fail(err) {
-      if (scanSeq !== scanSequence) return;
+    /**
+     * The one place this gives up, used by both exhaustion paths — a reply that
+     * never arrives and a reply that arrives malformed. "The request may still
+     * have been processed, check the ScanLog" was not something a guard can act
+     * on with a visitor in front of them. Say what is known, and what to do.
+     */
+    function giveUp(detail) {
       leaveCapturedState();
-      if (!err.signedOut) {
-        notice('scanError', err.message || 'The scan could not be checked.');
-        resumeScanning();
-      }
+      el('checkingStop').hidden = true;
+      notice('scanError',
+        'No answer after ' + Math.round(elapsed() / 1000) + ' seconds and ' +
+        attemptNo + ' attempt' + (attemptNo === 1 ? '' : 's') + '. ' +
+        'The pass WAS checked \u2014 the decision is recorded in the sheet \u2014 but ' +
+        'the answer did not reach this phone, so it cannot be shown here.\n\n' +
+        'Do not admit on this. Confirm with the host, or ask GAC to look up the ' +
+        'pass. Scanning again is safe: within two minutes it returns the same ' +
+        'decision without counting a second entry.\n\n' +
+        describeTiming() + (detail ? '\n\n' + detail : ''));
+      resumeScanning();
     }
 
-    attempt(SCAN_RETRIES).then(handle, fail);
+    function fail(err) {
+      if (scanSeq !== scanSequence) return;
+      if (err.signedOut) { el('checkingStop').hidden = true; leaveCapturedState(); return; }
+      if (err.rateLimited) {
+        // Not a failed scan and not a pass problem. Say so plainly rather than
+        // routing it through the "no answer" message, which would send a guard
+        // chasing a fault that does not exist.
+        leaveCapturedState();
+        el('checkingStop').hidden = true;
+        notice('scanError', err.message);
+        resumeScanning();
+        return;
+      }
+      giveUp(err.message || '');
+    }
+
+    attempt().then(handle, fail);
   }
 
   function resumeScanning() {

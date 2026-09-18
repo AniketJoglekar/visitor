@@ -171,6 +171,18 @@
    * working sign-in. `setStatus` writes, so it is deliberately not retried —
    * a repeat could re-apply a change the operator has since reversed.
    */
+  /**
+   * Timing of the most recent reply. Kept so a failure message can say where the
+   * time went rather than only how much of it there was.
+   */
+  var lastTiming = null;
+
+  function describeTiming() {
+    if (!lastTiming || lastTiming.serverMs === null) return '';
+    return 'Last reply: script took ' + (lastTiming.serverMs / 1000).toFixed(1) +
+           's, delivery took ' + (lastTiming.deliveryMs / 1000).toFixed(1) + 's.';
+  }
+
   function post(payload, retries, attemptNo) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again.');
@@ -182,6 +194,7 @@
     var attemptIndex = (typeof attemptNo === 'number') ? attemptNo : 0;
     var timeoutMs = timeoutForAttempt(attemptIndex);
 
+    var sentAt = Date.now();
     var controller = (typeof AbortController === 'function') ? new AbortController() : null;
     var timedOut = false;
     var timer = controller ? window.setTimeout(function () {
@@ -213,7 +226,8 @@
       if (/^<(!doctype|html)/i.test(body) || body.indexOf('<HTML') === 0) {
         throw new Error('Expected data, received a web page (HTTP ' + r.res.status +
                         ', served by ' + describeOrigin(r.res.url) + ').\n\n' +
-                        firstUsefulText(body) + '\n\nWorth checking in this order: the ' +
+                        firstUsefulText(body) + '\n\n' + describeTiming() +
+                        '\n\nWorth checking in this order: the ' +
                         'deployment is out of date or archived; its access is not set to ' +
                         '\u201cAnyone\u201d; config.js points at the wrong /exec URL; the script ' +
                         'needs re-authorising (run Check configuration from the sheet menu); ' +
@@ -226,7 +240,7 @@
       if (data && data.authError) { requireSignIn(data.error); throw signedOut(data.error); }
       return data;
     }).catch(function (err) {
-      if (err.signedOut || budget <= 0) throw err;
+      if (err.signedOut || err.rateLimited || budget <= 0) throw err;
       return post(payload, budget - 1, attemptIndex + 1);
     });
   }
