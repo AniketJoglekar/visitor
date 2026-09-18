@@ -42,6 +42,25 @@
    * holding the phone can see who sent it. Tags are stripped rather than
    * rendered — this goes into textContent, never innerHTML.
    */
+  /**
+   * Names which hop answered. Apps Script POSTs go to script.google.com, which
+   * runs the script and redirects to script.googleusercontent.com, where the
+   * body is actually served. Only the first hop appears in the Executions log,
+   * so when a reply is wrong this is the only way to tell which end failed.
+   */
+  function describeOrigin(url) {
+    var text = String(url || '');
+    if (text.indexOf('script.googleusercontent.com') !== -1) {
+      return 'script.googleusercontent.com (the content hop, after your script ran)';
+    }
+    if (text.indexOf('script.google.com') !== -1) {
+      return 'script.google.com (the entry hop, before your script ran)';
+    }
+    if (!text) return 'an unreported address';
+    try { return text.split('/')[2] || text.substring(0, 60); }
+    catch (err) { return text.substring(0, 60); }
+  }
+
   function firstUsefulText(html) {
     var title = /<title[^>]*>([\s\S]{1,200}?)<\/title>/i.exec(html || '');
     var stripped = String(html || '')
@@ -255,7 +274,8 @@
       // authorisation page, a Google error page and a network filter page look
       // nothing alike, and the first line of text identifies which it is.
       if (/^<(!doctype|html)/i.test(body) || body.indexOf('<HTML') === 0) {
-        throw new Error('Expected data, received a web page (HTTP ' + r.res.status + ').\n\n' +
+        throw new Error('Expected data, received a web page (HTTP ' + r.res.status +
+                        ', served by ' + describeOrigin(r.res.url) + ').\n\n' +
                         firstUsefulText(body) + '\n\nWorth checking in this order: the ' +
                         'deployment is out of date or archived; its access is not set to ' +
                         '\u201cAnyone\u201d; config.js points at the wrong /exec URL; the script ' +
