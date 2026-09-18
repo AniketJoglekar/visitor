@@ -675,6 +675,19 @@
     line-height: 1.5;
   }
 
+  .signin__busy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .signin__busy-label {
+    margin: 0;
+    font-size: 15px;
+    opacity: 0.75;
+  }
+
   .spinner {
     width: 17px;
     height: 17px;
@@ -718,6 +731,14 @@
   <div class="signin__mid">
     <h2>Authorized Personnel Only</h2>
     <div id="gsiButton"></div>
+    <!-- Shown while the ID token is being checked with the server. The Google
+         button used to stay on screen with nothing happening, which reads as a
+         dead button — and with retries a slow content hop can hold this for a
+         minute. -->
+    <div class="signin__busy" id="signinBusy" hidden>
+      <span class="spinner"></span>
+      <p class="signin__busy-label" id="signinBusyLabel">Checking your access…</p>
+    </div>
     <p class="notice" id="signinError" hidden></p>
   </div>
   <a class="sidelink" href="dashboard.html">Pass dashboard <span>&rarr;</span></a>

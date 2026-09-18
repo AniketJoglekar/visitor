@@ -27,7 +27,12 @@
   var current = null;
   var checkTimer = null;
   var scanSequence = 0;
-  var photoCache = { token: null, dataUri: null };
+  // An LRU of in-flight or settled photo fetches, keyed by pass token. Holding
+  // the *promise* rather than the result is what lets the photo request start
+  // in parallel with the scan: whoever asks second joins the request already
+  // running instead of issuing a second one.
+  var photoCache = [];
+  var PHOTO_CACHE_MAX = 20;
 
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
@@ -123,11 +128,36 @@
   // Sign in
   // -------------------------------------------------------------------------
 
+  /**
+   * Shows or hides the "checking your access" state. The Google button is
+   * hidden while it runs: leaving it on screen with nothing happening reads as
+   * a dead button, and a slow content hop plus retries can hold this for a
+   * minute. The label escalates so a long wait looks like progress rather than
+   * a hang.
+   */
+  var signinBusyTimers = [];
+  function setSigninBusy(busy) {
+    signinBusyTimers.forEach(window.clearTimeout);
+    signinBusyTimers = [];
+    el('gsiButton').hidden = !!busy;
+    el('signinBusy').hidden = !busy;
+    if (!busy) return;
+    el('signinBusyLabel').textContent = 'Checking your access\u2026';
+    signinBusyTimers.push(window.setTimeout(function () {
+      el('signinBusyLabel').textContent = 'Still checking \u2014 the server is slow to answer\u2026';
+    }, 6000));
+    signinBusyTimers.push(window.setTimeout(function () {
+      el('signinBusyLabel').textContent = 'Taking longer than usual. Trying again\u2026';
+    }, 20000));
+  }
+
   window.handleCredentialResponse = function (response) {
     session.idToken = response.credential;
     session.expiresAt = expiryOf(response.credential);
     notice('signinError', '');
+    setSigninBusy(true);
     post({ action: 'session' }, NETWORK_RETRIES).then(function (data) {
+      setSigninBusy(false);
       if (!data.ok) { notice('signinError', data.error || 'Sign-in refused.'); return; }
       session.scanner = data.scanner;
       el('barWho').textContent = data.scanner.name || data.scanner.email || '';
@@ -137,6 +167,7 @@
       show('paneScan');
       startCamera();
     }).catch(function (err) {
+      setSigninBusy(false);
       notice('signinError', String(err.message || err));
     });
   };
@@ -202,6 +233,7 @@
     session.scanner = null;
     lastToken = { value: null, at: 0 };
     clearVerdict();
+    purgePhotoCache();
     stopCamera();
     el('barWho').hidden = true;
     el('signOut').hidden = true;
@@ -472,6 +504,10 @@
     // a naive retry the sheet gained a second admission for one visitor.
     var requestId = newRequestId();
 
+    // In parallel, not after the verdict. This is the difference between the
+    // guard waiting scan+photo and waiting max(scan, photo).
+    prefetchPhoto(token);
+
     function attempt(triesLeft) {
       return post({ action: 'scan', token: token, requestId: requestId })
         .catch(function (err) {
@@ -654,19 +690,45 @@
 
   /** Fetches once per pass; the full-screen view reuses the same bytes. */
   function fetchPhoto(token) {
-    if (photoCache.token === token && photoCache.dataUri) {
-      return Promise.resolve(photoCache.dataUri);
-    }
-    return post({ action: 'photo', token: token }, NETWORK_RETRIES).then(function (data) {
-      if (!data.ok) throw new Error(data.error || 'Photograph unavailable.');
-      var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-      if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
-        throw new Error('Photograph rejected as unreadable.');
+    for (var i = 0; i < photoCache.length; i++) {
+      if (photoCache[i].token === token) {
+        var hit = photoCache.splice(i, 1)[0];
+        photoCache.push(hit);                       // most recently used last
+        return hit.promise;
       }
-      var uri = 'data:' + data.mime + ';base64,' + data.data;
-      photoCache = { token: token, dataUri: uri };
-      return uri;
-    });
+    }
+    var promise = post({ action: 'photo', token: token }, NETWORK_RETRIES)
+      .then(function (data) {
+        if (!data.ok) throw new Error(data.error || 'Photograph unavailable.');
+        var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+        if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
+          throw new Error('Photograph rejected as unreadable.');
+        }
+        return 'data:' + data.mime + ';base64,' + data.data;
+      })
+      .catch(function (err) {
+        // A failure must not be cached, or one bad fetch would poison the
+        // photograph for that pass until sign-out.
+        photoCache = photoCache.filter(function (e) { return e.token !== token; });
+        throw err;
+      });
+
+    photoCache.push({ token: token, promise: promise });
+    while (photoCache.length > PHOTO_CACHE_MAX) photoCache.shift();
+    return promise;
+  }
+
+  /**
+   * Starts the photograph fetch at the same moment as the scan, rather than
+   * after the verdict has rendered. The photo endpoint verifies the token
+   * itself, so it does not depend on the scan's answer — running them in
+   * sequence simply added a whole round trip before the face appeared. On a
+   * refusal the fetch is wasted, which costs one request and no extra time.
+   */
+  function prefetchPhoto(token) {
+    try {
+      fetchPhoto(token).catch(function () { /* surfaced later by showInlinePhoto */ });
+    } catch (err) { /* never let a prefetch break a scan */ }
   }
 
   function startMeter() {
@@ -682,6 +744,16 @@
   }
 
   /** Wipes every trace of the previous visitor from the verdict pane. */
+  /**
+   * Drops every cached photograph. Called where the screen must not be usable
+   * by whoever picks the phone up next — sign-out, and the idle clear that B7
+   * added — but deliberately NOT on "Scan next visitor", where the guard is
+   * still working and re-fetching a face they saw a minute ago is pure latency.
+   */
+  function purgePhotoCache() {
+    photoCache = [];
+  }
+
   function clearVerdict() {
     stopMeter();
     current = null;
@@ -696,7 +768,7 @@
     el('track').hidden = true;
     el('verdictPhoto').hidden = true;
     el('verdictPhotoImg').removeAttribute('src');
-    photoCache = { token: null, dataUri: null };
+    setSigninBusy(false);
     el('paneVerdict').classList.remove('verdict--allow');
   }
 
@@ -853,6 +925,7 @@
   function clearVisitorFromScreen() {
     if (!el('paneVerdict').hasAttribute('data-active')) return;
     clearVerdict();
+    purgePhotoCache();
     show('paneScan');
     startCamera();
   }
