@@ -172,18 +172,44 @@
    * a repeat could re-apply a change the operator has since reversed.
    */
   /**
-   * Timing of the most recent reply. Kept so a failure message can say where the
-   * time went rather than only how much of it there was.
+   * Timing of the most recent reply, PER ACTION.
+   *
+   * This was one shared variable, which made the failure message actively
+   * misleading: a scan that never got an answer was reported alongside the
+   * timing of whatever last succeeded — usually the sign-in or the photograph —
+   * implying the scan had been delivered in four seconds when no scan reply had
+   * arrived at all. The question that matters is whether THIS action has ever
+   * come back, so the timings are kept apart.
    */
-  var lastTiming = null;
+  var timings = {};
 
-  function describeTiming() {
-    if (!lastTiming || lastTiming.serverMs === null) return '';
-    return 'Last reply: script took ' + (lastTiming.serverMs / 1000).toFixed(1) +
-           's, delivery took ' + (lastTiming.deliveryMs / 1000).toFixed(1) + 's.';
+  function describeTiming(action) {
+    var mine = timings[action];
+    var others = Object.keys(timings).filter(function (k) {
+      return k !== action && timings[k] && timings[k].serverMs !== null;
+    });
+
+    var line;
+    if (mine && mine.serverMs !== null) {
+      line = 'Last ' + action + ' reply: script took ' +
+             (mine.serverMs / 1000).toFixed(1) + 's, delivery took ' +
+             (mine.deliveryMs / 1000).toFixed(1) + 's.';
+    } else {
+      line = 'No ' + action + ' reply has ever reached this phone in this session.';
+    }
+
+    // Naming what DID arrive is the discriminator. If photographs come back in
+    // four seconds while scans never return, the fault is specific to the scan
+    // request rather than to delivery in general.
+    if (others.length) {
+      line += ' Other requests are arriving: ' + others.map(function (k) {
+        return k + ' in ' + ((timings[k].serverMs + timings[k].deliveryMs) / 1000).toFixed(1) + 's';
+      }).join(', ') + '.';
+    }
+    return line;
   }
 
-  function post(payload, retries, attemptNo) {
+  function post(payload, retries, attemptNo, capMs) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again.');
       return Promise.reject(signedOut('Signed out'));
@@ -193,6 +219,8 @@
     var budget = (typeof retries === 'number') ? retries : 0;
     var attemptIndex = (typeof attemptNo === 'number') ? attemptNo : 0;
     var timeoutMs = timeoutForAttempt(attemptIndex);
+    // A caller running its own retry loop can cap this to the time it has left.
+    if (typeof capMs === 'number') timeoutMs = Math.min(timeoutMs, capMs);
 
     var sentAt = Date.now();
     var controller = (typeof AbortController === 'function') ? new AbortController() : null;
@@ -226,7 +254,7 @@
       if (/^<(!doctype|html)/i.test(body) || body.indexOf('<HTML') === 0) {
         throw new Error('Expected data, received a web page (HTTP ' + r.res.status +
                         ', served by ' + describeOrigin(r.res.url) + ').\n\n' +
-                        firstUsefulText(body) + '\n\n' + describeTiming() +
+                        firstUsefulText(body) + '\n\n' + describeTiming('dashboard') +
                         '\n\nWorth checking in this order: the ' +
                         'deployment is out of date or archived; its access is not set to ' +
                         '\u201cAnyone\u201d; config.js points at the wrong /exec URL; the script ' +

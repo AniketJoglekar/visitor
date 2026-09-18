@@ -309,18 +309,44 @@
    * start of a shift by a fault the scanner would have shrugged off.
    */
   /**
-   * Timing of the most recent reply. Kept so a failure message can say where the
-   * time went rather than only how much of it there was.
+   * Timing of the most recent reply, PER ACTION.
+   *
+   * This was one shared variable, which made the failure message actively
+   * misleading: a scan that never got an answer was reported alongside the
+   * timing of whatever last succeeded — usually the sign-in or the photograph —
+   * implying the scan had been delivered in four seconds when no scan reply had
+   * arrived at all. The question that matters is whether THIS action has ever
+   * come back, so the timings are kept apart.
    */
-  var lastTiming = null;
+  var timings = {};
 
-  function describeTiming() {
-    if (!lastTiming || lastTiming.serverMs === null) return '';
-    return 'Last reply: script took ' + (lastTiming.serverMs / 1000).toFixed(1) +
-           's, delivery took ' + (lastTiming.deliveryMs / 1000).toFixed(1) + 's.';
+  function describeTiming(action) {
+    var mine = timings[action];
+    var others = Object.keys(timings).filter(function (k) {
+      return k !== action && timings[k] && timings[k].serverMs !== null;
+    });
+
+    var line;
+    if (mine && mine.serverMs !== null) {
+      line = 'Last ' + action + ' reply: script took ' +
+             (mine.serverMs / 1000).toFixed(1) + 's, delivery took ' +
+             (mine.deliveryMs / 1000).toFixed(1) + 's.';
+    } else {
+      line = 'No ' + action + ' reply has ever reached this phone in this session.';
+    }
+
+    // Naming what DID arrive is the discriminator. If photographs come back in
+    // four seconds while scans never return, the fault is specific to the scan
+    // request rather than to delivery in general.
+    if (others.length) {
+      line += ' Other requests are arriving: ' + others.map(function (k) {
+        return k + ' in ' + ((timings[k].serverMs + timings[k].deliveryMs) / 1000).toFixed(1) + 's';
+      }).join(', ') + '.';
+    }
+    return line;
   }
 
-  function post(payload, retries, attemptNo) {
+  function post(payload, retries, attemptNo, capMs) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
       return Promise.reject(signedOut('Signed out'));
@@ -330,6 +356,8 @@
     var budget = (typeof retries === 'number') ? retries : 0;
     var attemptIndex = (typeof attemptNo === 'number') ? attemptNo : 0;
     var timeoutMs = timeoutForAttempt(attemptIndex);
+    // A caller running its own retry loop can cap this to the time it has left.
+    if (typeof capMs === 'number') timeoutMs = Math.min(timeoutMs, capMs);
 
     // A hung request used to hang the gate with no upper bound and no feedback,
     // so "it takes forever" was indistinguishable from "it failed".
@@ -406,11 +434,10 @@
       // getting the answer back. Until now both were one opaque number, which is
       // why "the scan is slow" could not be pinned on either side.
       var roundTripMs = Date.now() - sentAt;
-      lastTiming = {
+      timings[payload.action] = {
         roundTripMs: roundTripMs,
         serverMs: (typeof data.serverMs === 'number') ? data.serverMs : null,
-        deliveryMs: (typeof data.serverMs === 'number') ? roundTripMs - data.serverMs : null,
-        action: payload.action
+        deliveryMs: (typeof data.serverMs === 'number') ? roundTripMs - data.serverMs : null
       };
       if (data && data.authError) {
         requireSignIn(data.error);
@@ -599,7 +626,12 @@
      */
     function attempt() {
       attemptNo++;
-      return post({ action: 'scan', token: token, requestId: requestId }, 0, attemptNo - 1)
+      // Cap this attempt to whatever is left of the budget. Checking the
+      // deadline only before starting one let a 4th attempt begin at 59s and
+      // run a further 30, so a "60 second" limit produced an 82 second wait.
+      var remaining = Math.max(2000, SCAN_RETRY_DEADLINE_MS - elapsed());
+      return post({ action: 'scan', token: token, requestId: requestId },
+                  0, attemptNo - 1, remaining)
         .catch(function (err) {
           if (err.signedOut || err.rateLimited || givenUp) throw err;
           if (elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
@@ -704,7 +736,7 @@
         'Do not admit on this. Confirm with the host, or ask GAC to look up the ' +
         'pass. Scanning again is safe: within two minutes it returns the same ' +
         'decision without counting a second entry.\n\n' +
-        describeTiming() + (detail ? '\n\n' + detail : ''));
+        describeTiming('scan') + (detail ? '\n\n' + detail : ''));
       resumeScanning();
     }
 
