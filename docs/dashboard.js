@@ -23,6 +23,29 @@
 
   var IDLE_CLEAR_MS = 5 * 60 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
+
+  // Generous: Apps Script routinely takes 2-4 seconds and a cold script longer.
+  // This bounds a hang, it does not police latency.
+  var REQUEST_TIMEOUT_MS = 30 * 1000;
+
+  /**
+   * Pulls the first readable sentences out of an HTML error page so the reader
+   * can see who sent it. Tags are stripped, never rendered — this goes into
+   * textContent.
+   */
+  function firstUsefulText(html) {
+    var title = /<title[^>]*>([\s\S]{1,200}?)<\/title>/i.exec(html || '');
+    var stripped = String(html || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    var head = (title ? 'Page title: ' + title[1].trim() + '. ' : '') + stripped;
+    if (!head) return 'The page contained no readable text.';
+    return head.length > 300 ? head.substring(0, 300) + '\u2026' : head;
+  }
  
   var FILTERS = { fAll: 'all', fActive: 'active', fUpcoming: 'upcoming',
                   fExpired: 'expired', fRevoked: 'revoked' };
@@ -119,19 +142,42 @@
       return Promise.reject(signedOut('Signed out'));
     }
     payload.idToken = session.idToken;
+
+    var controller = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timedOut = false;
+    var timer = controller ? window.setTimeout(function () {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS) : null;
+    var clearTimer = function () { if (timer) window.clearTimeout(timer); };
+
     return fetch(CONFIG.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
     }).then(function (res) {
       return res.text().then(function (body) { return { res: res, body: body }; });
     }, function () {
+      clearTimer();
+      if (timedOut) {
+        throw new Error('The server did not answer within ' +
+                        Math.round(REQUEST_TIMEOUT_MS / 1000) + ' seconds. The request may ' +
+                        'still have been processed \u2014 check the sheet before retrying.');
+      }
       throw new Error('Could not reach the server. Check the network, then API_URL in config.js.');
     }).then(function (r) {
+      clearTimer();
       var body = (r.body || '').trim();
+      // Show what arrived rather than asserting a cause. The old message named
+      // deployment faults it could not verify and discarded the page itself.
       if (/^<(!doctype|html)/i.test(body) || body.indexOf('<HTML') === 0) {
-        throw new Error('The API URL returned a web page instead of data. The ' +
-                        'deployment is probably out of date or its access is not "Anyone".');
+        throw new Error('Expected data, received a web page (HTTP ' + r.res.status + ').\n\n' +
+                        firstUsefulText(body) + '\n\nWorth checking in this order: the ' +
+                        'deployment is out of date or archived; its access is not set to ' +
+                        '\u201cAnyone\u201d; config.js points at the wrong /exec URL; the script ' +
+                        'needs re-authorising (run Check configuration from the sheet menu); ' +
+                        'something on the network is intercepting the request.');
       }
       if (!r.res.ok) throw new Error('Server returned HTTP ' + r.res.status + '.');
       if (body.charAt(0) !== '{') throw new Error('Unexpected reply from the server.');

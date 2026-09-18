@@ -32,6 +32,30 @@
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
 
+  // Apps Script routinely takes 2-4 seconds per request and a cold script can
+  // take longer, so this is generous. It exists to put a bound on a hang, not
+  // to police latency.
+  var REQUEST_TIMEOUT_MS = 30 * 1000;
+
+  /**
+   * Pulls the first readable sentences out of an HTML error page so the person
+   * holding the phone can see who sent it. Tags are stripped rather than
+   * rendered — this goes into textContent, never innerHTML.
+   */
+  function firstUsefulText(html) {
+    var title = /<title[^>]*>([\s\S]{1,200}?)<\/title>/i.exec(html || '');
+    var stripped = String(html || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    var head = (title ? 'Page title: ' + title[1].trim() + '. ' : '') + stripped;
+    if (!head) return 'The page contained no readable text.';
+    return head.length > 300 ? head.substring(0, 300) + '\u2026' : head;
+  }
+
   /**
    * Different jsQR builds attach different things to window. 1.4.0 exposes the
    * function directly; some earlier and CDN/ESM builds expose
@@ -188,27 +212,55 @@
       return Promise.reject(signedOut('Signed out'));
     }
     payload.idToken = session.idToken;
+
+    // A hung request used to hang the gate with no upper bound and no feedback,
+    // so "it takes forever" was indistinguishable from "it failed".
+    var controller = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timedOut = false;
+    var timer = controller ? window.setTimeout(function () {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS) : null;
+    var clearTimer = function () { if (timer) window.clearTimeout(timer); };
+
     // text/plain keeps this a simple request, so the browser skips the CORS
     // preflight that Apps Script web apps cannot answer.
     return fetch(CONFIG.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
     }).then(function (res) {
       // Read as text first. Apps Script answers a stale, wrongly-scoped or
       // unauthorised deployment with an HTML page, and res.json() on that
       // throws a parse error that says nothing useful about the real cause.
       return res.text().then(function (body) { return { res: res, body: body }; });
     }, function () {
+      clearTimer();
+      if (timedOut) {
+        throw new Error('The server did not answer within ' +
+                        Math.round(REQUEST_TIMEOUT_MS / 1000) + ' seconds. The request ' +
+                        'may still have been processed \u2014 check the ScanLog before ' +
+                        'rescanning.');
+      }
       throw new Error('Could not reach the server. Check the phone\u2019s network, ' +
                       'then check API_URL in config.js.');
     }).then(function (r) {
+      clearTimer();
       var body = (r.body || '').trim();
 
+      // Do not guess at the cause. This used to assert three deployment faults
+      // and throw the page away, which sent one investigation down the wrong
+      // path for days. Show what arrived: a Google sign-in page, an
+      // authorisation page, a Google error page and a network filter page look
+      // nothing alike, and the first line of text identifies which it is.
       if (/^<(!doctype|html)/i.test(body) || body.indexOf('<HTML') === 0) {
-        throw new Error('The API URL returned a web page instead of data. Usually ' +
-                        'the deployment is out of date, its access is not set to ' +
-                        '"Anyone", or config.js points at the wrong /exec URL.');
+        throw new Error('Expected data, received a web page (HTTP ' + r.res.status + ').\n\n' +
+                        firstUsefulText(body) + '\n\nWorth checking in this order: the ' +
+                        'deployment is out of date or archived; its access is not set to ' +
+                        '\u201cAnyone\u201d; config.js points at the wrong /exec URL; the script ' +
+                        'needs re-authorising (run Check configuration from the sheet menu); ' +
+                        'something on the network is intercepting the request.');
       }
       if (!r.res.ok) throw new Error('Server returned HTTP ' + r.res.status + '.');
       if (body.charAt(0) !== '{') {
@@ -362,6 +414,23 @@
           return;
         }
         current = { token: token, data: data };
+
+        // A verdict is rendered only when the server actually stated one.
+        // renderVerdict() treats anything that is not the string 'ALLOW' as a
+        // denial, so a reply that parsed, passed data.ok, but carried no
+        // `result` field produced a confident red DENY with an empty name and
+        // no reason — indistinguishable to a guard from a real refusal, and
+        // with nothing in ScanLog to match it. Turning a legitimate visitor
+        // away on a malformed reply is not a safe default; saying so is.
+        if (data.result !== 'ALLOW' && data.result !== 'DENY') {
+          notice('scanError', 'The server replied without a verdict (' +
+                 (data.result === undefined ? 'no result field'
+                                            : 'result was "' + String(data.result).substring(0, 40) + '"') +
+                 '). Do not admit on this. Rescan, and report it if it repeats.');
+          resumeScanning();
+          return;
+        }
+
         renderVerdict(data);
         show('paneVerdict');
         touchActivity();
