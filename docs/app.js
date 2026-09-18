@@ -39,6 +39,26 @@
   // arrives with the verdict. See prefetchPhoto().
   var PHOTO_PREFETCH_OFFSET_MS = 600;
 
+  /**
+   * Running tally for this sign-in. The retry machinery hides failures so well
+   * that the only evidence of them was an impression of how often an amber flag
+   * appeared — and three reports gave 7%, "most", and 50% across changes that
+   * did not touch request timing. Impressions cannot separate our behaviour from
+   * Google's, so count instead.
+   *
+   * Reset on sign-in, never persisted, and shown only on the idle scan screen.
+   */
+  var tally = { scans: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
+
+  function tallyLine() {
+    if (!tally.scans) return 'Hold the visitor\u2019s QR code inside the frame.';
+    var bits = [tally.scans + (tally.scans === 1 ? ' scan' : ' scans')];
+    if (tally.replayed) bits.push(tally.replayed + ' needed a retry');
+    if (tally.photoFailed) bits.push(tally.photoFailed + ' without a photo');
+    if (tally.gaveUp) bits.push(tally.gaveUp + ' gave up');
+    return bits.join(' \u00b7 ');
+  }
+
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
 
@@ -57,8 +77,15 @@
   var ATTEMPT_TIMEOUTS_MS = [8000, 15000, 30000];
   var REQUEST_TIMEOUT_MS = ATTEMPT_TIMEOUTS_MS[ATTEMPT_TIMEOUTS_MS.length - 1];
 
-  function timeoutForAttempt(n) {
-    return ATTEMPT_TIMEOUTS_MS[Math.min(n, ATTEMPT_TIMEOUTS_MS.length - 1)];
+  // A photograph is 100-200 KB plus Drive work on a cold cache; a verdict is
+  // about 1 KB. Giving both the same 8-second first attempt aborted photo
+  // requests that were going to succeed, and the guard saw "the server did not
+  // answer within 8 seconds" under an otherwise perfect verdict.
+  var PHOTO_TIMEOUTS_MS = [15000, 25000, 30000];
+
+  function timeoutForAttempt(n, action) {
+    var table = (action === 'photo') ? PHOTO_TIMEOUTS_MS : ATTEMPT_TIMEOUTS_MS;
+    return table[Math.min(n, table.length - 1)];
   }
 
   // Two retries after the first attempt. Each carries the same request ID, so
@@ -269,6 +296,9 @@
     session.expiresAt = 0;
     session.scanner = null;
     lastToken = { value: null, at: 0 };
+    // A new sign-in is a new shift. Carrying the previous guard's counts over
+    // would make the figure useless as evidence.
+    tally = { scans: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
     clearVerdict();
     purgePhotoCache();
     stopCamera();
@@ -367,7 +397,7 @@
 
     var budget = (typeof retries === 'number') ? retries : 0;
     var attemptIndex = (typeof attemptNo === 'number') ? attemptNo : 0;
-    var timeoutMs = timeoutForAttempt(attemptIndex);
+    var timeoutMs = timeoutForAttempt(attemptIndex, payload.action);
     // A caller running its own retry loop can cap this to the time it has left.
     if (typeof capMs === 'number') timeoutMs = Math.min(timeoutMs, capMs);
 
@@ -480,7 +510,9 @@
   function startCamera() {
     notice('scanError', '');
     leaveCapturedState();
-    el('scanHint').textContent = 'Hold the visitor\u2019s QR code inside the frame.';
+    // One source for this line. It was written literally in three places, so
+    // adding the session tally to two of them left the third silently winning.
+    el('scanHint').textContent = tallyLine();
 
     camera.decode = getDecoder();
     if (!camera.decode) {
@@ -763,6 +795,8 @@
           return;
         }
 
+        tally.scans++;
+        if (data.replayed) tally.replayed++;
         renderVerdict(data);
         show('paneVerdict');
         touchActivity();
@@ -785,7 +819,8 @@
         'Do not admit on this. Confirm with the host, or ask GAC to look up the ' +
         'pass. Scanning again is safe: within two minutes it returns the same ' +
         'decision without counting a second entry.\n\n' +
-        describeTiming('scan') + (detail ? '\n\n' + detail : ''));
+        describeTiming('scan') + ' ' + tallyLine() + '.' +
+        (detail ? '\n\n' + detail : ''));
       resumeScanning();
     }
 
@@ -802,6 +837,7 @@
         resumeScanning();
         return;
       }
+      tally.gaveUp++;
       giveUp(err.message || '');
     }
 
@@ -814,7 +850,9 @@
     // does NOT, so its progress text survives while it is still trying.
     resetCheckingOverlay();
     leaveCapturedState();
-    el('scanHint').textContent = 'Hold the visitor\u2019s QR code inside the frame.';
+    // Set last: leaveCapturedState() rewrites this, so an earlier assignment
+    // was silently discarded.
+    el('scanHint').textContent = tallyLine();
     if (camera.stream) { camera.running = true; tick(); }
     else startCamera();
   }
@@ -928,6 +966,7 @@
         if (err.signedOut) return;
         // The old version discarded any message longer than 40 characters,
         // which is every message that actually says what went wrong.
+        tally.photoFailed++;
         note.textContent = err.message || 'Photo unavailable';
       });
   }
@@ -1255,6 +1294,9 @@
     // as soon as the code leaves the frame instead.
     clearVerdict();
     show('paneScan');
+    // Same wording as resumeScanning(), which this path does not use: it starts
+    // the camera directly rather than resuming an existing stream.
+    el('scanHint').textContent = tallyLine();
     startCamera();
   });
 
