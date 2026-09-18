@@ -541,6 +541,31 @@
     camera.raf = requestAnimationFrame(tick);
   }
 
+  /**
+   * The overlay's resting wording, taken from the markup on first use so the
+   * two cannot drift apart.
+   */
+  var checkingNoteDefault = null;
+
+  /**
+   * Puts the "checking" overlay back to its resting state.
+   *
+   * The retry path writes progress into this note and nothing ever put it back,
+   * so once a scan had retried, every later scan opened showing "Still asking —
+   * attempt 4, 43s" beside a timer counting from zero. The guard was told a
+   * fresh scan was already four attempts deep.
+   *
+   * Called when a NEW scan starts, not from enterCapturedState(), because the
+   * retry path re-enters that state deliberately and must keep its progress.
+   */
+  function resetCheckingOverlay() {
+    if (checkingNoteDefault === null) {
+      checkingNoteDefault = el('checkingNote').textContent;
+    }
+    el('checkingNote').textContent = checkingNoteDefault;
+    el('checkingStop').hidden = true;
+  }
+
   function enterCapturedState() {
     camera.running = false;
     if (camera.raf) { cancelAnimationFrame(camera.raf); camera.raf = null; }
@@ -580,6 +605,7 @@
     if (token === lastToken.value && now - lastToken.at < 2500) return;
     lastToken = { value: token, at: now };
 
+    resetCheckingOverlay();
     enterCapturedState();
 
     var scanSeq = ++scanSequence;
@@ -760,6 +786,10 @@
   }
 
   function resumeScanning() {
+    // Every route back to waiting for a code passes through here — a verdict
+    // dismissed, a failure given up on, a throttle. The retry path deliberately
+    // does NOT, so its progress text survives while it is still trying.
+    resetCheckingOverlay();
     leaveCapturedState();
     el('scanHint').textContent = 'Hold the visitor\u2019s QR code inside the frame.';
     if (camera.stream) { camera.running = true; tick(); }
