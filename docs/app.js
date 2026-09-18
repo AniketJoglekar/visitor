@@ -37,6 +37,11 @@
   // to police latency.
   var REQUEST_TIMEOUT_MS = 30 * 1000;
 
+  // Two retries after the first attempt. Each carries the same request ID, so
+  // the server replays its stored verdict rather than admitting the visitor
+  // again. Three lost replies in a row is a real outage, not a blip.
+  var SCAN_RETRIES = 2;
+
   /**
    * Pulls the first readable sentences out of an HTML error page so the person
    * holding the phone can see who sent it. Tags are stripped rather than
@@ -423,6 +428,17 @@
     el('viewport').hidden = false;
   }
 
+  /**
+   * An opaque per-attempt identifier. The server stores its verdict under this
+   * and replays it for a repeat, so a retry cannot record a second entry.
+   */
+  function newRequestId() {
+    if (window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID().replace(/-/g, '');
+    }
+    return String(Date.now()) + '-' + Math.random().toString(36).substring(2, 12);
+  }
+
   function onCode(token) {
     var now = Date.now();
     if (token === lastToken.value && now - lastToken.at < 2500) return;
@@ -431,7 +447,22 @@
     enterCapturedState();
 
     var scanSeq = ++scanSequence;
-    post({ action: 'scan', token: token })
+    // One ID for the whole attempt, reused by every retry. Apps Script loses
+    // replies routinely — the script completes and the phone gets nothing — so
+    // without a retry the guard was told to go and read a spreadsheet, and with
+    // a naive retry the sheet gained a second admission for one visitor.
+    var requestId = newRequestId();
+
+    function attempt(triesLeft) {
+      return post({ action: 'scan', token: token, requestId: requestId })
+        .catch(function (err) {
+          if (err.signedOut || triesLeft <= 0) throw err;
+          el('scanHint').textContent = 'No answer yet \u2014 asking again\u2026';
+          return attempt(triesLeft - 1);
+        });
+    }
+
+    attempt(SCAN_RETRIES)
       .then(function (data) {
         if (scanSeq !== scanSequence) return;   // superseded by a later scan
         leaveCapturedState();
@@ -544,6 +575,10 @@
     // the button and letting the screen read as a clean ALLOW.
     var warnings = [];
     if (data.warning) warnings.push(data.warning);
+    if (data.replayed) {
+      warnings.push('This is the answer to an earlier attempt that did not come ' +
+                    'back. It has not been counted as a second entry.');
+    }
     if (allow && !data.hasPhoto) {
       warnings.push('No photograph on file for this pass. Do not admit on it ' +
                     'alone — confirm with the host before letting them through.');
