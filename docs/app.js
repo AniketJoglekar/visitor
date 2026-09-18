@@ -274,6 +274,13 @@
       } catch (err) {
         throw new Error('Server reply was not readable.');
       }
+      // Keep the bytes that produced this object. When a reply parses but is
+      // missing fields the server always sends, the only way to tell a server
+      // fault from something rewriting the response in transit is to look at
+      // what actually arrived.
+      try {
+        Object.defineProperty(data, '__raw', { value: body, enumerable: false });
+      } catch (ignored) { /* frozen or non-object reply; the checks below still run */ }
       if (data && data.authError) {
         requireSignIn(data.error);
         // Marked, not matched on text. This used to throw a plain Error whose
@@ -415,18 +422,30 @@
         }
         current = { token: token, data: data };
 
-        // A verdict is rendered only when the server actually stated one.
-        // renderVerdict() treats anything that is not the string 'ALLOW' as a
-        // denial, so a reply that parsed, passed data.ok, but carried no
-        // `result` field produced a confident red DENY with an empty name and
-        // no reason — indistinguishable to a guard from a real refusal, and
-        // with nothing in ScanLog to match it. Turning a legitimate visitor
-        // away on a malformed reply is not a safe default; saying so is.
+        // A verdict is rendered only when the server actually stated one, and
+        // only when it carries what the server always sends with it. deny()
+        // sets `reason` unconditionally and attaches `visitor` whenever the
+        // pass was found; handleScan() always sends `visitor` on ALLOW. A reply
+        // missing those parsed cleanly and rendered as a bare red DENY with no
+        // reason and no name — indistinguishable from a real refusal, and with
+        // a correct, contradicting row already written to ScanLog.
+        var shapeFault = null;
         if (data.result !== 'ALLOW' && data.result !== 'DENY') {
-          notice('scanError', 'The server replied without a verdict (' +
-                 (data.result === undefined ? 'no result field'
-                                            : 'result was "' + String(data.result).substring(0, 40) + '"') +
-                 '). Do not admit on this. Rescan, and report it if it repeats.');
+          shapeFault = (data.result === undefined
+            ? 'no result field'
+            : 'result was "' + String(data.result).substring(0, 40) + '"');
+        } else if (data.result === 'DENY' && !data.reason) {
+          shapeFault = 'a refusal with no reason';
+        } else if (!data.visitor && data.reason !== 'Not an IIT Tirupati visitor pass.' &&
+                   String(data.reason || '').indexOf('No record for this pass') !== 0) {
+          shapeFault = 'a verdict with no visitor details';
+        }
+
+        if (shapeFault) {
+          notice('scanError', 'The server sent an incomplete reply (' + shapeFault +
+                 '). Do not admit on this \u2014 the scan may already have been recorded. ' +
+                 'Rescan, and report this if it repeats.\n\nReceived: ' +
+                 describeReply(data));
           resumeScanning();
           return;
         }
@@ -468,6 +487,20 @@
     } catch (e) {
       return new Date(iso).toLocaleString();
     }
+  }
+
+  /**
+   * Describes a reply that parsed but is missing fields. Shows the keys present
+   * and the raw bytes, so a server fault and a rewritten response can be told
+   * apart without a laptop and a debugger at the gate.
+   */
+  function describeReply(data) {
+    var keys;
+    try { keys = Object.keys(data).join(', '); } catch (err) { keys = '(unreadable)'; }
+    var raw = (data && data.__raw) ? String(data.__raw) : '';
+    var shown = raw.length > 240 ? raw.substring(0, 240) + '\u2026' : raw;
+    return 'fields [' + keys + ']' +
+           (raw ? '; ' + raw.length + ' bytes: ' + shown : '');
   }
 
   function renderVerdict(data) {
