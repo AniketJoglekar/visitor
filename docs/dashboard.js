@@ -28,6 +28,9 @@
   // This bounds a hang, it does not police latency.
   var REQUEST_TIMEOUT_MS = 30 * 1000;
 
+  // Retries for requests that change nothing and so are safe to repeat.
+  var NETWORK_RETRIES = 2;
+
   /**
    * Pulls the first readable sentences out of an HTML error page so the reader
    * can see who sent it. Tags are stripped, never rendered — this goes into
@@ -155,12 +158,20 @@
     return err;
   }
  
-  function post(payload) {
+  /**
+   * `retries` is extra attempts for actions that change nothing. Apps Script's
+   * content hop returns a Drive 404 often enough that one attempt is not a
+   * working sign-in. `setStatus` writes, so it is deliberately not retried —
+   * a repeat could re-apply a change the operator has since reversed.
+   */
+  function post(payload, retries) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again.');
       return Promise.reject(signedOut('Signed out'));
     }
     payload.idToken = session.idToken;
+
+    var budget = (typeof retries === 'number') ? retries : 0;
 
     var controller = (typeof AbortController === 'function') ? new AbortController() : null;
     var timedOut = false;
@@ -205,6 +216,9 @@
       try { data = JSON.parse(body); } catch (e) { throw new Error('Server reply was not readable.'); }
       if (data && data.authError) { requireSignIn(data.error); throw signedOut(data.error); }
       return data;
+    }).catch(function (err) {
+      if (err.signedOut || budget <= 0) throw err;
+      return post(payload, budget - 1);
     });
   }
  
@@ -223,7 +237,7 @@
   function load() {
     var seq = ++loadSeq;
     el('count').innerHTML = '<span class="spinner"></span> Loading\u2026';
-    post({ action: 'dashboard' })
+    post({ action: 'dashboard' }, NETWORK_RETRIES)
       .then(function (data) {
         if (seq !== loadSeq) return;
         if (!data.ok) {

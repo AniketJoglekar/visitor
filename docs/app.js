@@ -42,6 +42,9 @@
   // again. Three lost replies in a row is a real outage, not a blip.
   var SCAN_RETRIES = 2;
 
+  // Retries for requests that change nothing and so are safe to repeat.
+  var NETWORK_RETRIES = 2;
+
   /**
    * Pulls the first readable sentences out of an HTML error page so the person
    * holding the phone can see who sent it. Tags are stripped rather than
@@ -124,7 +127,7 @@
     session.idToken = response.credential;
     session.expiresAt = expiryOf(response.credential);
     notice('signinError', '');
-    post({ action: 'session' }).then(function (data) {
+    post({ action: 'session' }, NETWORK_RETRIES).then(function (data) {
       if (!data.ok) { notice('signinError', data.error || 'Sign-in refused.'); return; }
       session.scanner = data.scanner;
       el('barWho').textContent = data.scanner.name || data.scanner.email || '';
@@ -230,12 +233,25 @@
     return err;
   }
 
-  function post(payload) {
+  /**
+   * `retries` is the number of extra attempts for actions that are safe to
+   * repeat because they change nothing: session, photo. A scan is NOT safe to
+   * repeat blindly — it records an entry — so it passes 0 here and runs its own
+   * retry carrying a request ID the server replays against.
+   *
+   * Added because Apps Script's content hop returns a Drive 404 often enough
+   * that a single attempt is not a working sign-in. Round 21 gave scanning a
+   * retry and left sign-in without one, so a guard could be locked out at the
+   * start of a shift by a fault the scanner would have shrugged off.
+   */
+  function post(payload, retries) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
       return Promise.reject(signedOut('Signed out'));
     }
     payload.idToken = session.idToken;
+
+    var budget = (typeof retries === 'number') ? retries : 0;
 
     // A hung request used to hang the gate with no upper bound and no feedback,
     // so "it takes forever" was indistinguishable from "it failed".
@@ -316,6 +332,9 @@
         throw signedOut(data.error);
       }
       return data;
+    }).catch(function (err) {
+      if (err.signedOut || budget <= 0) throw err;
+      return post(payload, budget - 1);
     });
   }
 
@@ -638,7 +657,7 @@
     if (photoCache.token === token && photoCache.dataUri) {
       return Promise.resolve(photoCache.dataUri);
     }
-    return post({ action: 'photo', token: token }).then(function (data) {
+    return post({ action: 'photo', token: token }, NETWORK_RETRIES).then(function (data) {
       if (!data.ok) throw new Error(data.error || 'Photograph unavailable.');
       var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
       if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
