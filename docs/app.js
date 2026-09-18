@@ -684,38 +684,69 @@
       .catch(function (err) {
         if (!current || current.token !== forToken) return;
         if (err.signedOut) return;
-        note.textContent = err.message && err.message.length < 40 ? err.message : 'Photo unavailable';
+        // The old version discarded any message longer than 40 characters,
+        // which is every message that actually says what went wrong.
+        note.textContent = err.message || 'Photo unavailable';
       });
   }
 
   /** Fetches once per pass; the full-screen view reuses the same bytes. */
   function fetchPhoto(token) {
     for (var i = 0; i < photoCache.length; i++) {
-      if (photoCache[i].token === token) {
-        var hit = photoCache.splice(i, 1)[0];
-        photoCache.push(hit);                       // most recently used last
-        return hit.promise;
-      }
+      if (photoCache[i].token !== token) continue;
+      // Returned even when it failed. The prefetch and the verdict panel are
+      // two consumers of ONE scan and must share one retry budget — evicting a
+      // failure here made them run the budget twice over. Failed entries are
+      // dropped when the guard moves on, so the next scan of the same pass
+      // starts fresh.
+      var hit = photoCache.splice(i, 1)[0];
+      photoCache.push(hit);                         // most recently used last
+      return hit.promise;
     }
-    var promise = post({ action: 'photo', token: token }, NETWORK_RETRIES)
-      .then(function (data) {
+    /**
+     * One attempt. The payload check is deliberately inside the retry, not
+     * after it: the server coerces `mime` into the allowed list and always
+     * sends the image, so a reply that passes `ok` and then fails this check
+     * has lost or mangled its payload in transit — the Round 19 signature. That
+     * is transient and worth asking again for, and a photo fetch is a read, so
+     * repeating it is free of consequence.
+     */
+    function attemptPhoto(triesLeft) {
+      // One retry point only. An earlier version retried inside both the then
+      // and the catch, so each failure branched twice and a budget of 2 turned
+      // into 7 requests. The payload check throws; the catch decides.
+      return post({ action: 'photo', token: token }).then(function (data) {
         if (!data.ok) throw new Error(data.error || 'Photograph unavailable.');
         var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-        if (ALLOWED.indexOf(data.mime) === -1 || !/^[A-Za-z0-9+/=]+$/.test(data.data || '')) {
-          throw new Error('Photograph rejected as unreadable.');
+        var badMime = ALLOWED.indexOf(data.mime) === -1;
+        var badData = !/^[A-Za-z0-9+/=]+$/.test(data.data || '');
+        if (badMime || badData) {
+          // The server coerces mime into the allowed list and always sends the
+          // image, so a reply that passed `ok` and failed here lost its payload
+          // in transit. Transient, and a photo fetch is a read, so it is safe
+          // to ask again.
+          throw new Error('The photograph did not arrive intact (' +
+            (badMime ? 'type "' + String(data.mime).substring(0, 30) + '"' : 'type ok') + ', ' +
+            (data.data === undefined ? 'no image data'
+              : String(data.data).length + ' characters received') +
+            '). The verdict above is still valid \u2014 confirm the face another way.');
         }
         return 'data:' + data.mime + ';base64,' + data.data;
-      })
-      .catch(function (err) {
-        // A failure must not be cached, or one bad fetch would poison the
-        // photograph for that pass until sign-out.
-        photoCache = photoCache.filter(function (e) { return e.token !== token; });
-        throw err;
+      }).catch(function (err) {
+        if (err.signedOut || triesLeft <= 0) throw err;
+        return attemptPhoto(triesLeft - 1);
       });
+    }
 
-    photoCache.push({ token: token, promise: promise });
+    var entry = { token: token, promise: null, failed: false };
+    entry.promise = attemptPhoto(NETWORK_RETRIES).catch(function (err) {
+      entry.failed = true;      // so the next lookup retries rather than reusing this
+      throw err;
+    });
+
+    photoCache.push(entry);
     while (photoCache.length > PHOTO_CACHE_MAX) photoCache.shift();
-    return promise;
+    return entry.promise;
   }
 
   /**
@@ -752,6 +783,14 @@
    */
   function purgePhotoCache() {
     photoCache = [];
+  }
+
+  /**
+   * Drops entries whose fetch failed, so the next scan of that pass tries
+   * again. Successful entries are kept — that is the whole point of the cache.
+   */
+  function dropFailedPhotos() {
+    photoCache = photoCache.filter(function (e) { return !e.failed; });
   }
 
   function clearVerdict() {
@@ -949,6 +988,7 @@
   // -------------------------------------------------------------------------
 
   el('scanNext').addEventListener('click', function () {
+    dropFailedPhotos();
     // Deliberately NOT clearing lastToken here. The pass is normally still in
     // front of the camera, and clearing it re-read the same code on the next
     // frame and put the same verdict straight back on screen. tick() clears it
