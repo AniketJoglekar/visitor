@@ -517,8 +517,11 @@
         });
     }
 
-    attempt(SCAN_RETRIES)
-      .then(function (data) {
+    // Budget for replies that arrive but are malformed, separate from the
+    // budget for replies that do not arrive at all.
+    var shapeRetries = SCAN_RETRIES;
+
+    function handle(data) {
         if (scanSeq !== scanSequence) return;   // superseded by a later scan
         leaveCapturedState();
         if (!data.ok) {
@@ -536,7 +539,15 @@
         // reason and no name — indistinguishable from a real refusal, and with
         // a correct, contradicting row already written to ScanLog.
         var shapeFault = null;
-        if (data.result !== 'ALLOW' && data.result !== 'DENY') {
+        var keys = Object.keys(data);
+        if (keys.length === 1 && data.ok === true) {
+          // Exactly what doGet() returns, and nothing else in the backend
+          // produces it. Apps Script answers a POST with a 302 and the browser
+          // converts it to a GET; that normally lands on the content host
+          // holding the real answer. Landing back on /exec runs doGet instead.
+          shapeFault = 'the GET endpoint answered instead of the scan \u2014 ' +
+                       'Google redirected the request to the wrong place';
+        } else if (data.result !== 'ALLOW' && data.result !== 'DENY') {
           shapeFault = (data.result === undefined
             ? 'no result field'
             : 'result was "' + String(data.result).substring(0, 40) + '"');
@@ -548,6 +559,16 @@
         }
 
         if (shapeFault) {
+          // Retrying is safe here and was not before Round 21: the same request
+          // ID is sent again, and the server replays its stored verdict rather
+          // than recording a second entry. Without that guarantee a retry would
+          // have added a phantom admission every time.
+          if (shapeRetries > 0) {
+            shapeRetries--;
+            el('scanHint').textContent = 'Reply was incomplete \u2014 asking again\u2026';
+            attempt(0).then(handle, fail);
+            return;
+          }
           notice('scanError', 'The server sent an incomplete reply (' + shapeFault +
                  '). Do not admit on this \u2014 the scan may already have been recorded. ' +
                  'Rescan, and report this if it repeats.\n\nReceived: ' +
@@ -559,15 +580,18 @@
         renderVerdict(data);
         show('paneVerdict');
         touchActivity();
-      })
-      .catch(function (err) {
-        if (scanSeq !== scanSequence) return;
-        leaveCapturedState();
-        if (!err.signedOut) {
-          notice('scanError', err.message || 'The scan could not be checked.');
-          resumeScanning();
-        }
-      });
+    }
+
+    function fail(err) {
+      if (scanSeq !== scanSequence) return;
+      leaveCapturedState();
+      if (!err.signedOut) {
+        notice('scanError', err.message || 'The scan could not be checked.');
+        resumeScanning();
+      }
+    }
+
+    attempt(SCAN_RETRIES).then(handle, fail);
   }
 
   function resumeScanning() {
