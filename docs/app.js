@@ -572,7 +572,9 @@
     // identifier no one at a gate acts on. Both left out so the buttons stay
     // reachable without scrolling.
     var rows = [];
-    if (visitor.purpose) rows.push({ label: 'Purpose', value: visitor.purpose, clamp: true });
+    // `visitor.purpose` is the wire field name, kept so the server and client
+    // do not have to be renamed in lockstep. The label is what the guard reads.
+    if (visitor.purpose) rows.push({ label: 'Venue', value: visitor.purpose, clamp: true });
     if (visitor.host || visitor.hostPhone) {
       rows.push({ label: 'Host', value: visitor.host || '', tel: visitor.hostPhone || '' });
     }

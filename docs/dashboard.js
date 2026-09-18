@@ -15,6 +15,14 @@
   var passes = [];
   var filter = 'all';
   var loadSeq = 0;
+  // The server decides how many rows it returns and reports it. config.js does
+  // not carry DASHBOARD_LIMIT, so reading CONFIG for it always fell through to
+  // a hardcoded 300 and the "most recent only" notice fired at the wrong count
+  // the moment the server's limit was changed.
+  var serverLimit = 300;
+
+  var IDLE_CLEAR_MS = 5 * 60 * 1000;
+  var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
  
   var FILTERS = { fAll: 'all', fActive: 'active', fUpcoming: 'upcoming',
                   fExpired: 'expired', fRevoked: 'revoked' };
@@ -71,6 +79,10 @@
   }
  
   function requireSignIn(message) {
+    // Cancel first. Without this the sign-out timer armed by the previous
+    // session still fired and called signOut() again, re-prompting Google.
+    if (idleClear) { window.clearTimeout(idleClear); idleClear = null; }
+    if (idleSignout) { window.clearTimeout(idleSignout); idleSignout = null; }
     session.idToken = null;
     session.admin = null;
     passes = [];
@@ -165,8 +177,10 @@
         el('paneSignin').hidden = true;
         el('paneList').hidden = false;
         notice('listError', '');
+        if (typeof data.limit === 'number' && data.limit > 0) serverLimit = data.limit;
         passes = data.passes || [];
         render();
+        touchActivity();
       })
       .catch(function (err) {
         if (seq !== loadSeq) return;
@@ -204,7 +218,7 @@
     var rows = visible();
  
     el('count').textContent = rows.length + ' of ' + passes.length + ' pass(es)' +
-      (passes.length >= (CONFIG.DASHBOARD_LIMIT || 300) ? ' \u2014 most recent only' : '');
+      (passes.length >= serverLimit ? ' \u2014 most recent only' : '');
  
     if (!rows.length) {
       var empty = document.createElement('p');
@@ -294,6 +308,44 @@
         load();
       });
   }
+ 
+  // -------------------------------------------------------------------------
+  // Idle handling
+  // -------------------------------------------------------------------------
+ 
+  /*
+   * B7 gave the scanner a visitor-details clear and an auto sign-out because an
+   * unattended signed-in gate phone was leaving one visitor's details on screen.
+   * The dashboard was written later and never got either, while showing far
+   * more: up to DASHBOARD_LIMIT visitor names with affiliations, hosts and host
+   * phone numbers, all at once, on a laptop the security head walks away from.
+   * Clearing is cheap here because Refresh reloads everything.
+   */
+  var idleClear = null;
+  var idleSignout = null;
+ 
+  function clearListFromScreen() {
+    if (el('paneList').hidden) return;
+    passes = [];
+    el('list').innerHTML = '';
+    el('count').textContent = 'Screen cleared while idle. Press Refresh to reload.';
+    notice('listOk', '');
+    notice('listError', '');
+  }
+ 
+  function touchActivity() {
+    if (idleClear) window.clearTimeout(idleClear);
+    if (idleSignout) window.clearTimeout(idleSignout);
+    if (!session.idToken) return;
+    idleClear = window.setTimeout(clearListFromScreen, IDLE_CLEAR_MS);
+    idleSignout = window.setTimeout(function () {
+      signOut();
+    }, IDLE_SIGNOUT_MS);
+  }
+ 
+  ['click', 'touchstart', 'keydown'].forEach(function (evt) {
+    document.addEventListener(evt, touchActivity, { passive: true });
+  });
  
   // -------------------------------------------------------------------------
   // Wiring
