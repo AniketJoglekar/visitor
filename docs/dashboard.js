@@ -26,7 +26,14 @@
 
   // Generous: Apps Script routinely takes 2-4 seconds and a cold script longer.
   // This bounds a hang, it does not police latency.
-  var REQUEST_TIMEOUT_MS = 30 * 1000;
+  // Escalating, matching the scanner. The backend answers in 3-5 seconds or the
+  // reply is not coming, so a flat 30s meant three long waits for nothing.
+  var ATTEMPT_TIMEOUTS_MS = [8000, 15000, 30000];
+  var REQUEST_TIMEOUT_MS = ATTEMPT_TIMEOUTS_MS[ATTEMPT_TIMEOUTS_MS.length - 1];
+
+  function timeoutForAttempt(n) {
+    return ATTEMPT_TIMEOUTS_MS[Math.min(n, ATTEMPT_TIMEOUTS_MS.length - 1)];
+  }
 
   // Retries for requests that change nothing and so are safe to repeat.
   var NETWORK_RETRIES = 2;
@@ -164,7 +171,7 @@
    * working sign-in. `setStatus` writes, so it is deliberately not retried —
    * a repeat could re-apply a change the operator has since reversed.
    */
-  function post(payload, retries) {
+  function post(payload, retries, attemptNo) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again.');
       return Promise.reject(signedOut('Signed out'));
@@ -172,13 +179,15 @@
     payload.idToken = session.idToken;
 
     var budget = (typeof retries === 'number') ? retries : 0;
+    var attemptIndex = (typeof attemptNo === 'number') ? attemptNo : 0;
+    var timeoutMs = timeoutForAttempt(attemptIndex);
 
     var controller = (typeof AbortController === 'function') ? new AbortController() : null;
     var timedOut = false;
     var timer = controller ? window.setTimeout(function () {
       timedOut = true;
       controller.abort();
-    }, REQUEST_TIMEOUT_MS) : null;
+    }, timeoutMs) : null;
     var clearTimer = function () { if (timer) window.clearTimeout(timer); };
 
     return fetch(CONFIG.API_URL, {
@@ -192,7 +201,7 @@
       clearTimer();
       if (timedOut) {
         throw new Error('The server did not answer within ' +
-                        Math.round(REQUEST_TIMEOUT_MS / 1000) + ' seconds. The request may ' +
+                        Math.round(timeoutMs / 1000) + ' seconds. The request may ' +
                         'still have been processed \u2014 check the sheet before retrying.');
       }
       throw new Error('Could not reach the server. Check the network, then API_URL in config.js.');
@@ -218,7 +227,7 @@
       return data;
     }).catch(function (err) {
       if (err.signedOut || budget <= 0) throw err;
-      return post(payload, budget - 1);
+      return post(payload, budget - 1, attemptIndex + 1);
     });
   }
  

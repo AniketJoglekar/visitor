@@ -40,7 +40,21 @@
   // Apps Script routinely takes 2-4 seconds per request and a cold script can
   // take longer, so this is generous. It exists to put a bound on a hang, not
   // to police latency.
-  var REQUEST_TIMEOUT_MS = 30 * 1000;
+  // Escalating, not flat. The backend answers in 3-5 seconds or the reply is
+  // not coming: Apps Script's content hop routinely loses or misroutes it while
+  // the script itself completes and the row is already in ScanLog. Waiting 30
+  // seconds before the first retry was therefore 25 seconds of watching nothing
+  // happen, three times over.
+  //
+  // First attempt gives up quickly and asks again; a repeat is cheap because
+  // the server replays its stored verdict without touching the sheet. The last
+  // attempt is patient, in case the backend genuinely is slow.
+  var ATTEMPT_TIMEOUTS_MS = [8000, 15000, 30000];
+  var REQUEST_TIMEOUT_MS = ATTEMPT_TIMEOUTS_MS[ATTEMPT_TIMEOUTS_MS.length - 1];
+
+  function timeoutForAttempt(n) {
+    return ATTEMPT_TIMEOUTS_MS[Math.min(n, ATTEMPT_TIMEOUTS_MS.length - 1)];
+  }
 
   // Two retries after the first attempt. Each carries the same request ID, so
   // the server replays its stored verdict rather than admitting the visitor
@@ -276,7 +290,7 @@
    * retry and left sign-in without one, so a guard could be locked out at the
    * start of a shift by a fault the scanner would have shrugged off.
    */
-  function post(payload, retries) {
+  function post(payload, retries, attemptNo) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
       return Promise.reject(signedOut('Signed out'));
@@ -284,6 +298,8 @@
     payload.idToken = session.idToken;
 
     var budget = (typeof retries === 'number') ? retries : 0;
+    var attemptIndex = (typeof attemptNo === 'number') ? attemptNo : 0;
+    var timeoutMs = timeoutForAttempt(attemptIndex);
 
     // A hung request used to hang the gate with no upper bound and no feedback,
     // so "it takes forever" was indistinguishable from "it failed".
@@ -292,7 +308,7 @@
     var timer = controller ? window.setTimeout(function () {
       timedOut = true;
       controller.abort();
-    }, REQUEST_TIMEOUT_MS) : null;
+    }, timeoutMs) : null;
     var clearTimer = function () { if (timer) window.clearTimeout(timer); };
 
     // text/plain keeps this a simple request, so the browser skips the CORS
@@ -311,7 +327,7 @@
       clearTimer();
       if (timedOut) {
         throw new Error('The server did not answer within ' +
-                        Math.round(REQUEST_TIMEOUT_MS / 1000) + ' seconds. The request ' +
+                        Math.round(timeoutMs / 1000) + ' seconds. The request ' +
                         'may still have been processed \u2014 check the ScanLog before ' +
                         'rescanning.');
       }
@@ -366,7 +382,7 @@
       return data;
     }).catch(function (err) {
       if (err.signedOut || budget <= 0) throw err;
-      return post(payload, budget - 1);
+      return post(payload, budget - 1, attemptIndex + 1);
     });
   }
 
@@ -509,7 +525,8 @@
     prefetchPhoto(token);
 
     function attempt(triesLeft) {
-      return post({ action: 'scan', token: token, requestId: requestId })
+      var attemptNo = SCAN_RETRIES - triesLeft;
+      return post({ action: 'scan', token: token, requestId: requestId }, 0, attemptNo)
         .catch(function (err) {
           if (err.signedOut || triesLeft <= 0) throw err;
           el('scanHint').textContent = 'No answer yet \u2014 asking again\u2026';
@@ -566,7 +583,7 @@
           if (shapeRetries > 0) {
             shapeRetries--;
             el('scanHint').textContent = 'Reply was incomplete \u2014 asking again\u2026';
-            attempt(0).then(handle, fail);
+            attempt(shapeRetries).then(handle, fail);
             return;
           }
           notice('scanError', 'The server sent an incomplete reply (' + shapeFault +
