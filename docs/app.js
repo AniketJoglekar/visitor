@@ -34,6 +34,11 @@
   var photoCache = [];
   var PHOTO_CACHE_MAX = 20;
 
+  // How long after the scan request the photograph request starts. Long enough
+  // that the two are not staged together, short enough that the face still
+  // arrives with the verdict. See prefetchPhoto().
+  var PHOTO_PREFETCH_OFFSET_MS = 600;
+
   var IDLE_CLEAR_MS = 90 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
 
@@ -346,7 +351,14 @@
     return line;
   }
 
-  function post(payload, retries, attemptNo, capMs) {
+  /**
+   * `cancel`, when supplied, is an object this call registers its AbortController
+   * on. A caller running its own retry loop can then abort the request that is
+   * actually in flight. Without it, "Stop waiting" only suppressed the NEXT
+   * attempt and the guard still waited out the current timeout — ten seconds of
+   * a button appearing to do nothing.
+   */
+  function post(payload, retries, attemptNo, capMs, cancel) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
       return Promise.reject(signedOut('Signed out'));
@@ -369,6 +381,12 @@
       controller.abort();
     }, timeoutMs) : null;
     var clearTimer = function () { if (timer) window.clearTimeout(timer); };
+    if (cancel) {
+      cancel.abort = function () {
+        if (controller) { try { controller.abort(); } catch (ignored) {} }
+      };
+      if (cancel.cancelled) cancel.abort();
+    }
 
     // text/plain keeps this a simple request, so the browser skips the CORS
     // preflight that Apps Script web apps cannot answer.
@@ -624,8 +642,13 @@
     var givenUp = false;
 
     el('checkingStop').hidden = true;
+    var inFlight = { cancelled: false, abort: null };
     el('checkingStop').onclick = function () {
       givenUp = true;
+      inFlight.cancelled = true;
+      // Abort what is running now. Setting the flag alone left the guard
+      // watching the current attempt run to its full timeout.
+      if (inFlight.abort) inFlight.abort();
       el('checkingStop').hidden = true;
     };
 
@@ -657,7 +680,7 @@
       // run a further 30, so a "60 second" limit produced an 82 second wait.
       var remaining = Math.max(2000, SCAN_RETRY_DEADLINE_MS - elapsed());
       return post({ action: 'scan', token: token, requestId: requestId },
-                  0, attemptNo - 1, remaining)
+                  0, attemptNo - 1, remaining, inFlight)
         .catch(function (err) {
           if (err.signedOut || err.rateLimited || givenUp) throw err;
           if (elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
@@ -976,8 +999,26 @@
    * refusal the fetch is wasted, which costs one request and no extra time.
    */
   function prefetchPhoto(token) {
+    // Staggered, not simultaneous.
+    //
+    // Round 24 fired this in the same tick as the scan, which halved the time to
+    // a face on screen. Field evidence since suggests a cost: most scans came
+    // back flagged as replays, meaning the FIRST request of each pair was dying
+    // and the retry was doing the work. Two responses staged at the same instant
+    // for the same account is a plausible collision at Apps Script's content
+    // hop, which is exactly where the 404s come from.
+    //
+    // A short offset keeps nearly all of the parallel benefit — the photo still
+    // overlaps the scan, which takes seconds — while the two requests no longer
+    // start together. THIS IS A HYPOTHESIS. If the amber replay flag keeps
+    // appearing on most scans with this in place, it is wrong and the offset
+    // should go.
     try {
-      fetchPhoto(token).catch(function () { /* surfaced later by showInlinePhoto */ });
+      window.setTimeout(function () {
+        try {
+          fetchPhoto(token).catch(function () { /* surfaced later by showInlinePhoto */ });
+        } catch (err) { /* never let a prefetch break a scan */ }
+      }, PHOTO_PREFETCH_OFFSET_MS);
     } catch (err) { /* never let a prefetch break a scan */ }
   }
 
