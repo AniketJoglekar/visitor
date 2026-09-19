@@ -294,13 +294,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .btn--quiet {
-    background: transparent;
-    border: 1px solid currentColor;
-    opacity: 0.8;
-    margin-top: 14px;
-  }
-
   .checking__note {
     margin: 0;
     font-size: 14px;
@@ -764,9 +757,6 @@
       <p class="checking__label">Pass captured</p>
       <p class="checking__timer" id="checkingTimer">0.0s</p>
       <p class="checking__note" id="checkingNote">You can take the pass away. Checking with the server…</p>
-      <!-- Only appears once the first attempt has failed. A guard must never be
-           trapped watching a spinner with a visitor in front of them. -->
-      <button class="btn btn--quiet" id="checkingStop" hidden>Stop waiting</button>
     </div>
 
     <p class="scan__hint" id="scanHint">Hold the visitor's QR code inside the frame.</p>

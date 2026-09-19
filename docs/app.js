@@ -415,14 +415,7 @@
     return line;
   }
 
-  /**
-   * `cancel`, when supplied, is an object this call registers its AbortController
-   * on. A caller running its own retry loop can then abort the request that is
-   * actually in flight. Without it, "Stop waiting" only suppressed the NEXT
-   * attempt and the guard still waited out the current timeout — ten seconds of
-   * a button appearing to do nothing.
-   */
-  function post(payload, retries, attemptNo, capMs, cancel) {
+  function post(payload, retries, attemptNo, capMs) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
       return Promise.reject(signedOut('Signed out'));
@@ -445,12 +438,6 @@
       controller.abort();
     }, timeoutMs) : null;
     var clearTimer = function () { if (timer) window.clearTimeout(timer); };
-    if (cancel) {
-      cancel.abort = function () {
-        if (controller) { try { controller.abort(); } catch (ignored) {} }
-      };
-      if (cancel.cancelled) cancel.abort();
-    }
 
     // text/plain keeps this a simple request, so the browser skips the CORS
     // preflight that Apps Script web apps cannot answer.
@@ -647,7 +634,6 @@
       checkingNoteDefault = el('checkingNote').textContent;
     }
     el('checkingNote').textContent = checkingNoteDefault;
-    el('checkingStop').hidden = true;
   }
 
   function enterCapturedState() {
@@ -713,19 +699,6 @@
 
     var startedAt = Date.now();
     var attemptNo = 0;
-    var givenUp = false;
-
-    el('checkingStop').hidden = true;
-    var inFlight = { cancelled: false, abort: null };
-    el('checkingStop').onclick = function () {
-      givenUp = true;
-      inFlight.cancelled = true;
-      // Abort what is running now. Setting the flag alone left the guard
-      // watching the current attempt run to its full timeout.
-      if (inFlight.abort) inFlight.abort();
-      el('checkingStop').hidden = true;
-    };
-
     function elapsed() { return Date.now() - startedAt; }
 
     /**
@@ -754,22 +727,21 @@
       // run a further 30, so a "60 second" limit produced an 82 second wait.
       var remaining = SCAN_RETRY_DEADLINE_MS - elapsed();
       return post({ action: 'scan', token: token, requestId: requestId },
-                  0, attemptNo - 1, remaining, inFlight)
+                  0, attemptNo - 1, remaining)
         .catch(function (err) {
-          if (err.signedOut || err.rateLimited || givenUp) throw err;
+          if (err.signedOut || err.rateLimited) throw err;
           if (attemptNo >= SCAN_MAX_ATTEMPTS) throw err;
           // Enough left for an attempt that could actually succeed, not merely
           // enough to start one.
           if (SCAN_RETRY_DEADLINE_MS - elapsed() < MIN_USEFUL_ATTEMPT_MS) throw err;
 
-          el('checkingStop').hidden = false;
           el('checkingNote').textContent =
             'Still asking \u2014 attempt ' + (attemptNo + 1) + ', ' +
             Math.round(elapsed() / 1000) + 's. The pass has already been ' +
             'checked; waiting for the answer to come back.';
 
           return afterGap(function () {
-            if (givenUp || elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
+            if (elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
             return attempt();
           });
         });
@@ -821,16 +793,13 @@
           // a *successful* POST, so the ceiling inside attempt()'s catch never
           // fires on this path — and with a reply that arrives quickly, the
           // deadline alone allows an unbounded loop.
-          if (!givenUp && attemptNo < SCAN_MAX_ATTEMPTS &&
+          if (attemptNo < SCAN_MAX_ATTEMPTS &&
               SCAN_RETRY_DEADLINE_MS - elapsed() >= MIN_USEFUL_ATTEMPT_MS) {
-            el('checkingStop').hidden = false;
             el('checkingNote').textContent =
               'Reply arrived incomplete \u2014 still asking, attempt ' +
               (attemptNo + 1) + ', ' + Math.round(elapsed() / 1000) + 's.';
             enterCapturedState();
-            el('checkingStop').hidden = false;
             afterGap(function () {
-              if (givenUp) { giveUp(shapeFault); return; }
               return attempt().then(handle, fail);
             });
             return;
@@ -866,7 +835,6 @@
       // that arrived but was unusable.
       tally.gaveUp++;
       leaveCapturedState();
-      el('checkingStop').hidden = true;
 
       lastDiagnostic =
         new Date().toISOString() + '\n' +
@@ -890,13 +858,12 @@
 
     function fail(err) {
       if (scanSeq !== scanSequence) return;
-      if (err.signedOut) { el('checkingStop').hidden = true; leaveCapturedState(); return; }
+      if (err.signedOut) { leaveCapturedState(); return; }
       if (err.rateLimited) {
         // Not a failed scan and not a pass problem. Say so plainly rather than
         // routing it through the "no answer" message, which would send a guard
         // chasing a fault that does not exist.
         leaveCapturedState();
-        el('checkingStop').hidden = true;
         notice('scanError', err.message);
         resumeScanning();
         return;
