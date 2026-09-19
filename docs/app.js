@@ -1060,6 +1060,10 @@
 
     img.removeAttribute('src');
     tile.removeAttribute('data-loaded');
+    // Cleared for every verdict. Left set, the next visitor's tile would be
+    // styled as failed and a tap would retry their photograph instead of
+    // opening it.
+    tile.removeAttribute('data-failed');
     tile.setAttribute('data-empty', '');
 
     if (!hasPhoto || !current) {
@@ -1085,10 +1089,18 @@
       .catch(function (err) {
         if (!current || current.token !== forToken) return;
         if (err.signedOut) return;
-        // The old version discarded any message longer than 40 characters,
-        // which is every message that actually says what went wrong.
         tally.photoFailed++;
-        note.textContent = err.message || 'Photo unavailable';
+
+        // The detail goes to the diagnostic, not into a tile the size of a
+        // playing card. What the guard needs is a way to ask again.
+        lastDiagnostic = new Date().toISOString() + '\nPhotograph: ' +
+                         (err.message || 'unavailable') + '\n' +
+                         describeTiming('photo');
+        try { console.error('[visitor-pass] ' + lastDiagnostic); } catch (ignored) {}
+
+        tile.setAttribute('data-failed', '');
+        tile.hidden = false;
+        note.textContent = 'Photo didn\u2019t load \u2014 tap to retry';
       });
   }
 
@@ -1226,6 +1238,7 @@
     el('verdictFlag').hidden = true;
     el('track').hidden = true;
     el('verdictPhoto').hidden = true;
+    el('verdictPhoto').removeAttribute('data-failed');
     el('verdictPhotoImg').removeAttribute('src');
     setSigninBusy(false);
     el('paneVerdict').classList.remove('verdict--allow');
@@ -1447,7 +1460,20 @@
   });
 
   el('signOut').addEventListener('click', signOut);
-  el('verdictPhoto').addEventListener('click', openPhoto);
+  el('verdictPhoto').addEventListener('click', function () {
+    var tile = el('verdictPhoto');
+    if (!tile.hasAttribute('data-failed')) { openPhoto(); return; }
+
+    // Retry rather than open an overlay with nothing in it. The failed cache
+    // entry has to go first, or the next request would be handed the rejection
+    // that is already stored against this pass.
+    tile.removeAttribute('data-failed');
+    el('verdictPhotoNote').textContent = 'Loading photo\u2026';
+    dropFailedPhotos();
+    // The argument matters: showInlinePhoto() hides the tile and returns early
+    // when it is falsy, so calling it bare made the retry silently do nothing.
+    showInlinePhoto(!!(current && current.data && current.data.hasPhoto));
+  });
   el('photoClose').addEventListener('click', closePhoto);
   el('photoOverlay').addEventListener('click', function (event) {
     if (event.target === el('photoOverlay') || event.target.id === 'photoImg') closePhoto();

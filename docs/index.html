@@ -469,6 +469,16 @@
 
   .verdict__photo[data-loaded] small { display: none; }
 
+  /* A failed photograph turns the tile into a retry control. It is already a
+     button, so a nested one would be invalid markup — and the whole tile is a
+     far better tap target on a phone than a small button inside it. */
+  .verdict__photo[data-failed] {
+    border-color: var(--warn);
+    background: var(--warn-deep);
+  }
+
+  .verdict__photo[data-failed] small { color: var(--text); }
+
   /* signature element: where "now" sits inside the visit window */
 
   .track { margin: clamp(8px, 2.2vh, 20px) 0 0; }
