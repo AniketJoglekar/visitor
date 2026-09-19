@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apps Script delivery probe</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 760px; }
+  input { width: 100%; padding: 10px; font: inherit; box-sizing: border-box; }
+  button { padding: 12px 18px; font: inherit; margin: 6px 6px 6px 0; cursor: pointer; }
+  #out { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px;
+         background: #f4f4f4; padding: 12px; border-radius: 6px; margin-top: 14px; }
+  .tally { font-weight: 600; margin-top: 14px; }
+  .bad { color: #b00020; }
+  .good { color: #0a7d32; }
+</style>
+</head>
+<body>
+
+<h1>Apps Script delivery probe</h1>
+
+<p>Paste the probe deployment's <code>/exec</code> URL, then run it. Every reply
+is classified. Anything other than <code>doPost</code> is a misroute.</p>
+
+<p><input id="url" placeholder="https://script.google.com/macros/s/.../exec"></p>
+
+<p>
+  <button id="small">Run 20 &times; small</button>
+  <button id="big">Run 20 &times; large (~40 KB)</button>
+  <button id="clear">Clear</button>
+</p>
+
+<div class="tally" id="tally"></div>
+<div id="out"></div>
+
+<script>
+(function () {
+  var out = document.getElementById('out');
+  var tally = document.getElementById('tally');
+  var counts = { doPost: 0, doGet: 0, html: 0, mismatch: 0, error: 0, total: 0 };
+
+  function log(line) { out.textContent += line + '\n'; }
+
+  function render() {
+    var bad = counts.doGet + counts.html + counts.mismatch + counts.error;
+    tally.innerHTML = 'Total ' + counts.total +
+      ' &mdash; <span class="good">correct ' + counts.doPost + '</span>, ' +
+      '<span class="' + (bad ? 'bad' : 'good') + '">misrouted/failed ' + bad + '</span>' +
+      ' (doGet ' + counts.doGet + ', web page ' + counts.html +
+      ', wrong seq ' + counts.mismatch + ', error ' + counts.error + ')';
+  }
+
+  function once(url, seq, big) {
+    var started = Date.now();
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ seq: seq, big: !!big })
+    }).then(function (res) {
+      return res.text().then(function (text) { return { res: res, text: text }; });
+    }).then(function (r) {
+      var ms = Date.now() - started;
+      counts.total++;
+      var head = '#' + seq + '  ' + ms + 'ms  HTTP ' + r.res.status + '  ';
+      if (/^<(!doctype|html)/i.test(r.text.trim())) {
+        counts.html++;
+        var title = /<title[^>]*>([\s\S]{0,80}?)<\/title>/i.exec(r.text);
+        log(head + 'WEB PAGE  ' + (title ? title[1].trim() : '(no title)'));
+        return;
+      }
+      var data;
+      try { data = JSON.parse(r.text); }
+      catch (err) { counts.error++; log(head + 'UNPARSEABLE  ' + r.text.substring(0, 80)); return; }
+
+      if (data.answeredBy === 'doGet') {
+        counts.doGet++;
+        log(head + 'MISROUTED — answered by doGet');
+      } else if (data.answeredBy !== 'doPost') {
+        counts.error++;
+        log(head + 'UNEXPECTED  ' + JSON.stringify(data).substring(0, 100));
+      } else if (data.seq !== seq) {
+        counts.mismatch++;
+        log(head + 'CROSSED — asked for ' + seq + ', got ' + data.seq);
+      } else {
+        counts.doPost++;
+        log(head + 'ok  (' + r.text.length + ' bytes)');
+      }
+    }).catch(function (err) {
+      counts.total++; counts.error++;
+      log('#' + seq + '  NETWORK ERROR  ' + (err.message || err));
+    }).then(render);
+  }
+
+  function run(big) {
+    var url = document.getElementById('url').value.trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
+      log('That does not look like a /exec URL.');
+      return;
+    }
+    log('--- ' + (big ? 'large' : 'small') + ' run, ' + new Date().toLocaleTimeString() + ' ---');
+    // Sequential, not parallel: a gate scans one pass at a time, and parallel
+    // requests would test a different thing.
+    var chain = Promise.resolve();
+    for (var i = 1; i <= 20; i++) {
+      (function (n) { chain = chain.then(function () { return once(url, n, big); }); })(i);
+    }
+  }
+
+  document.getElementById('small').onclick = function () { run(false); };
+  document.getElementById('big').onclick = function () { run(true); };
+  document.getElementById('clear').onclick = function () {
+    out.textContent = '';
+    counts = { doPost: 0, doGet: 0, html: 0, mismatch: 0, error: 0, total: 0 };
+    render();
+  };
+  render();
+})();
+</script>
+</body>
+</html>
