@@ -3,117 +3,159 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Apps Script delivery probe</title>
+<title>Apps Script delivery probe v2</title>
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 760px; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 18px; max-width: 760px; }
   input { width: 100%; padding: 10px; font: inherit; box-sizing: border-box; }
-  button { padding: 12px 18px; font: inherit; margin: 6px 6px 6px 0; cursor: pointer; }
-  #out { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 13px;
-         background: #f4f4f4; padding: 12px; border-radius: 6px; margin-top: 14px; }
-  .tally { font-weight: 600; margin-top: 14px; }
-  .bad { color: #b00020; }
+  button { padding: 11px 14px; font: inherit; margin: 5px 5px 5px 0; cursor: pointer; }
+  button.run { background: #14396a; color: #fff; border: 0; border-radius: 6px; }
+  #out { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px;
+         background: #f4f4f4; padding: 10px; border-radius: 6px; margin-top: 12px;
+         max-height: 40vh; overflow-y: auto; }
+  table { border-collapse: collapse; width: 100%; margin-top: 14px; font-size: 14px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  th { background: #eee; }
+  .bad { color: #b00020; font-weight: 600; }
   .good { color: #0a7d32; }
+  p.note { font-size: 13px; color: #555; }
 </style>
 </head>
 <body>
 
-<h1>Apps Script delivery probe</h1>
+<h1>Delivery probe v2</h1>
 
-<p>Paste the probe deployment's <code>/exec</code> URL, then run it. Every reply
-is classified. Anything other than <code>doPost</code> is a misroute.</p>
+<p class="note">Run each mode in turn and send the results table. Each mode makes
+20 requests. The question is whether responses go missing when the handler takes
+longer, does spreadsheet work, or overlaps with another request.</p>
 
 <p><input id="url" placeholder="https://script.google.com/macros/s/.../exec"></p>
 
 <p>
-  <button id="small">Run 20 &times; small</button>
-  <button id="big">Run 20 &times; large (~40 KB)</button>
+  <button class="run" data-mode="instant">1. Instant</button>
+  <button class="run" data-mode="slow2">2. 2s delay</button>
+  <button class="run" data-mode="slow4">3. 4s delay</button>
+  <button class="run" data-mode="work">4. Sheet work</button>
+  <button class="run" data-mode="paired">5. Paired (overlapping)</button>
+  <button class="run" data-mode="big">6. Large reply</button>
   <button id="clear">Clear</button>
 </p>
 
-<div class="tally" id="tally"></div>
+<table id="tbl">
+  <thead><tr><th>Mode</th><th>Sent</th><th>OK</th><th>Failed</th><th>Rate</th><th>Median</th></tr></thead>
+  <tbody></tbody>
+</table>
+
 <div id="out"></div>
 
 <script>
 (function () {
   var out = document.getElementById('out');
-  var tally = document.getElementById('tally');
-  var counts = { doPost: 0, doGet: 0, html: 0, mismatch: 0, error: 0, total: 0 };
+  var tbody = document.querySelector('#tbl tbody');
 
-  function log(line) { out.textContent += line + '\n'; }
+  var MODES = {
+    instant: { label: 'Instant',            body: {} },
+    slow2:   { label: '2s delay',           body: { delayMs: 2000 } },
+    slow4:   { label: '4s delay',           body: { delayMs: 4000 } },
+    work:    { label: 'Sheet work',         body: { work: true } },
+    paired:  { label: 'Paired overlapping', body: { delayMs: 2000 }, paired: true },
+    big:     { label: 'Large reply',        body: { big: true } }
+  };
 
-  function render() {
-    var bad = counts.doGet + counts.html + counts.mismatch + counts.error;
-    tally.innerHTML = 'Total ' + counts.total +
-      ' &mdash; <span class="good">correct ' + counts.doPost + '</span>, ' +
-      '<span class="' + (bad ? 'bad' : 'good') + '">misrouted/failed ' + bad + '</span>' +
-      ' (doGet ' + counts.doGet + ', web page ' + counts.html +
-      ', wrong seq ' + counts.mismatch + ', error ' + counts.error + ')';
+  function log(s) { out.textContent += s + '\n'; out.scrollTop = out.scrollHeight; }
+
+  function median(a) {
+    if (!a.length) return 0;
+    var s = a.slice().sort(function (x, y) { return x - y; });
+    return s[Math.floor(s.length / 2)];
   }
 
-  function once(url, seq, big) {
+  function row(mode, sent, ok, bad, times) {
+    var tr = document.createElement('tr');
+    var rate = sent ? Math.round(100 * bad / sent) : 0;
+    [MODES[mode].label, sent, ok, bad, rate + '%', median(times) + 'ms'].forEach(function (v, i) {
+      var td = document.createElement('td');
+      td.textContent = v;
+      if (i === 4) td.className = bad ? 'bad' : 'good';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+
+  function once(url, mode, seq) {
+    var payload = JSON.parse(JSON.stringify(MODES[mode].body));
+    payload.seq = seq;
     var started = Date.now();
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ seq: seq, big: !!big })
+      body: JSON.stringify(payload)
     }).then(function (res) {
-      return res.text().then(function (text) { return { res: res, text: text }; });
+      return res.text().then(function (t) { return { res: res, text: t }; });
     }).then(function (r) {
       var ms = Date.now() - started;
-      counts.total++;
-      var head = '#' + seq + '  ' + ms + 'ms  HTTP ' + r.res.status + '  ';
       if (/^<(!doctype|html)/i.test(r.text.trim())) {
-        counts.html++;
-        var title = /<title[^>]*>([\s\S]{0,80}?)<\/title>/i.exec(r.text);
-        log(head + 'WEB PAGE  ' + (title ? title[1].trim() : '(no title)'));
-        return;
+        var ti = /<title[^>]*>([\s\S]{0,60}?)<\/title>/i.exec(r.text);
+        log('#' + seq + ' ' + ms + 'ms  WEB PAGE (HTTP ' + r.res.status + ') ' +
+            (ti ? ti[1].trim() : ''));
+        return { ok: false, ms: ms };
       }
-      var data;
-      try { data = JSON.parse(r.text); }
-      catch (err) { counts.error++; log(head + 'UNPARSEABLE  ' + r.text.substring(0, 80)); return; }
-
-      if (data.answeredBy === 'doGet') {
-        counts.doGet++;
-        log(head + 'MISROUTED — answered by doGet');
-      } else if (data.answeredBy !== 'doPost') {
-        counts.error++;
-        log(head + 'UNEXPECTED  ' + JSON.stringify(data).substring(0, 100));
-      } else if (data.seq !== seq) {
-        counts.mismatch++;
-        log(head + 'CROSSED — asked for ' + seq + ', got ' + data.seq);
-      } else {
-        counts.doPost++;
-        log(head + 'ok  (' + r.text.length + ' bytes)');
-      }
-    }).catch(function (err) {
-      counts.total++; counts.error++;
-      log('#' + seq + '  NETWORK ERROR  ' + (err.message || err));
-    }).then(render);
+      var d;
+      try { d = JSON.parse(r.text); }
+      catch (e) { log('#' + seq + ' ' + ms + 'ms  UNPARSEABLE'); return { ok: false, ms: ms }; }
+      if (d.answeredBy === 'doGet') { log('#' + seq + ' ' + ms + 'ms  MISROUTED to doGet'); return { ok: false, ms: ms }; }
+      if (d.answeredBy !== 'doPost') { log('#' + seq + ' ' + ms + 'ms  UNEXPECTED'); return { ok: false, ms: ms }; }
+      if (d.seq !== seq) { log('#' + seq + ' ' + ms + 'ms  CROSSED, got seq ' + d.seq); return { ok: false, ms: ms }; }
+      log('#' + seq + ' ' + ms + 'ms  ok (script ' + d.serverMs + 'ms)');
+      return { ok: true, ms: ms };
+    }).catch(function (e) {
+      log('#' + seq + '  NETWORK ERROR ' + (e.message || e));
+      return { ok: false, ms: Date.now() - started };
+    });
   }
 
-  function run(big) {
+  function run(mode) {
     var url = document.getElementById('url').value.trim();
     if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
       log('That does not look like a /exec URL.');
       return;
     }
-    log('--- ' + (big ? 'large' : 'small') + ' run, ' + new Date().toLocaleTimeString() + ' ---');
-    // Sequential, not parallel: a gate scans one pass at a time, and parallel
-    // requests would test a different thing.
-    var chain = Promise.resolve();
+    log('--- ' + MODES[mode].label + ', ' + new Date().toLocaleTimeString() + ' ---');
+    var ok = 0, bad = 0, times = [], chain = Promise.resolve();
+
     for (var i = 1; i <= 20; i++) {
-      (function (n) { chain = chain.then(function () { return once(url, n, big); }); })(i);
+      (function (n) {
+        chain = chain.then(function () {
+          if (!MODES[mode].paired) {
+            return once(url, mode, n).then(function (r) {
+              if (r.ok) ok++; else bad++;
+              times.push(r.ms);
+            });
+          }
+          // Two overlapping requests, 600ms apart — the scanner's own pattern:
+          // a scan, then the photograph shortly after, both in flight together.
+          var first = once(url, mode, n);
+          var second = new Promise(function (resolve) {
+            setTimeout(function () { resolve(once(url, mode, n + 1000)); }, 600);
+          });
+          return Promise.all([first, second]).then(function (rs) {
+            rs.forEach(function (r) { if (r.ok) ok++; else bad++; times.push(r.ms); });
+          });
+        });
+      })(i);
     }
+    chain.then(function () {
+      row(mode, ok + bad, ok, bad, times);
+      log('--- ' + MODES[mode].label + ': ' + ok + ' ok, ' + bad + ' failed ---\n');
+    });
   }
 
-  document.getElementById('small').onclick = function () { run(false); };
-  document.getElementById('big').onclick = function () { run(true); };
+  Array.prototype.forEach.call(document.querySelectorAll('button.run'), function (b) {
+    b.onclick = function () { run(b.getAttribute('data-mode')); };
+  });
   document.getElementById('clear').onclick = function () {
     out.textContent = '';
-    counts = { doPost: 0, doGet: 0, html: 0, mismatch: 0, error: 0, total: 0 };
-    render();
+    tbody.innerHTML = '';
   };
-  render();
 })();
 </script>
 </body>
