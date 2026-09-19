@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Apps Script delivery probe v2</title>
+<title>Apps Script delivery probe v3</title>
 <style>
   body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 18px; max-width: 760px; }
   input { width: 100%; padding: 10px; font: inherit; box-sizing: border-box; }
@@ -22,11 +22,16 @@
 </head>
 <body>
 
-<h1>Delivery probe v2</h1>
+<h1>Delivery probe v3</h1>
 
-<p class="note">Run each mode in turn and send the results table. Each mode makes
-20 requests. The question is whether responses go missing when the handler takes
-longer, does spreadsheet work, or overlaps with another request.</p>
+<p class="note"><strong>Serve this page from the same folder as the scanner and
+open it over https.</strong> Opened as a local file it sends a different origin
+from the scanner, and the comparison is not valid.</p>
+
+<p class="note">Run each mode in turn and send the results table. Modes 1&ndash;6
+eliminate causes; modes 7&ndash;9 try to <em>reproduce</em> the failure. Mode 9 is
+the closest replica of a real scan. Run this while the scanner is misbehaving —
+a clean sweep during a good spell proves nothing.</p>
 
 <p><input id="url" placeholder="https://script.google.com/macros/s/.../exec"></p>
 
@@ -37,6 +42,9 @@ longer, does spreadsheet work, or overlaps with another request.</p>
   <button class="run" data-mode="work">4. Sheet work</button>
   <button class="run" data-mode="paired">5. Paired (overlapping)</button>
   <button class="run" data-mode="big">6. Large reply</button>
+  <button class="run" data-mode="bigreq">7. Large request</button>
+  <button class="run" data-mode="outbound">8. Outbound fetch</button>
+  <button class="run" data-mode="scannerlike">9. Scanner-like</button>
   <button id="clear">Clear</button>
 </p>
 
@@ -58,7 +66,22 @@ longer, does spreadsheet work, or overlaps with another request.</p>
     slow4:   { label: '4s delay',           body: { delayMs: 4000 } },
     work:    { label: 'Sheet work',         body: { work: true } },
     paired:  { label: 'Paired overlapping', body: { delayMs: 2000 }, paired: true },
-    big:     { label: 'Large reply',        body: { big: true } }
+    big:     { label: 'Large reply',        body: { big: true } },
+
+    // A Google ID token is about 1.2 KB and rides on EVERY scanner request.
+    // v2 tested a large reply and never a large request.
+    bigreq:  { label: 'Large request',      body: {}, padRequest: 1200 },
+
+    // The scanner's handler calls Google's tokeninfo mid-execution on a cache
+    // miss. The probe had never made an outbound call from inside a request.
+    outbound:{ label: 'Outbound fetch',     body: { fetchOut: true } },
+
+    // Everything a real scan does, together: token-sized request, spreadsheet
+    // work, an outbound call, a couple of seconds of execution, and a second
+    // request overlapping it 600ms later.
+    scannerlike: { label: 'Scanner-like',
+                   body: { work: true, fetchOut: true, delayMs: 2000 },
+                   padRequest: 1200, paired: true }
   };
 
   function log(s) { out.textContent += s + '\n'; out.scrollTop = out.scrollHeight; }
@@ -84,6 +107,10 @@ longer, does spreadsheet work, or overlaps with another request.</p>
   function once(url, mode, seq) {
     var payload = JSON.parse(JSON.stringify(MODES[mode].body));
     payload.seq = seq;
+    // Stands in for the ID token the scanner sends on every request.
+    if (MODES[mode].padRequest) {
+      payload.token = new Array(MODES[mode].padRequest).join('t');
+    }
     var started = Date.now();
     return fetch(url, {
       method: 'POST',
@@ -105,7 +132,8 @@ longer, does spreadsheet work, or overlaps with another request.</p>
       if (d.answeredBy === 'doGet') { log('#' + seq + ' ' + ms + 'ms  MISROUTED to doGet'); return { ok: false, ms: ms }; }
       if (d.answeredBy !== 'doPost') { log('#' + seq + ' ' + ms + 'ms  UNEXPECTED'); return { ok: false, ms: ms }; }
       if (d.seq !== seq) { log('#' + seq + ' ' + ms + 'ms  CROSSED, got seq ' + d.seq); return { ok: false, ms: ms }; }
-      log('#' + seq + ' ' + ms + 'ms  ok (script ' + d.serverMs + 'ms)');
+      log('#' + seq + ' ' + ms + 'ms  ok (script ' + d.serverMs + 'ms, req ' +
+          d.requestBytes + 'B' + (d.fetched ? ', fetch ' + d.fetched : '') + ')');
       return { ok: true, ms: ms };
     }).catch(function (e) {
       log('#' + seq + '  NETWORK ERROR ' + (e.message || e));
