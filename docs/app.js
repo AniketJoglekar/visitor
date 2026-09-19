@@ -23,7 +23,8 @@
 
   var session = { idToken: null, expiresAt: 0, scanner: null };
   var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false,
-                 lastFrameAt: 0, watchdog: null, restarting: false };
+                 lastFrameAt: 0, watchdog: null, restarting: false,
+                 restarts: 0, lastRestartAt: 0 };
 
   // How long the camera may produce no frames before it is treated as dead.
   // A phone left on a desk locks its screen, and on several mobile browsers the
@@ -33,6 +34,19 @@
   // wrong. Nothing noticed that before.
   var CAMERA_STALL_MS = 10000;
   var CAMERA_WATCHDOG_MS = 3000;
+
+  // Restarts are capped. Without this the watchdog would retry every 3 seconds
+  // for as long as the page stayed open — and each attempt powers the camera up
+  // again, so a phone that cannot hold the camera would be drained by the thing
+  // meant to keep it working. After this many consecutive failures it stops and
+  // asks for a tap.
+  var CAMERA_MAX_RESTARTS = 3;
+
+  // Restarts are counted within a rolling window rather than reset by the next
+  // frame. Each restart briefly succeeds before the camera dies again, so
+  // resetting on a frame meant the cap could never be reached by exactly the
+  // failure it was built for.
+  var CAMERA_RESTART_WINDOW_MS = 60000;
   var lastToken = { value: null, at: 0 };
   var current = null;
   var checkTimer = null;
@@ -606,6 +620,10 @@
     camera.watchdog = window.setInterval(function () {
       if (!camera.running || camera.restarting) return;
       if (!el('paneScan').hasAttribute('data-active')) return;
+      // A hidden page has no camera by design — visibilitychange already
+      // stopped it. Restarting here would power the camera back up behind a
+      // locked screen and drain the battery to no purpose.
+      if (document.hidden) return;
 
       var live = !!camera.stream && camera.stream.getTracks().some(function (t) {
         return t.readyState === 'live';
@@ -615,6 +633,20 @@
       var stalled = !camera.lastFrameAt ||
                     (Date.now() - camera.lastFrameAt > CAMERA_STALL_MS);
       if (live && !stalled) return;
+
+      // A blip an hour apart is not a failing camera; six in a second is.
+      if (Date.now() - (camera.lastRestartAt || 0) > CAMERA_RESTART_WINDOW_MS) {
+        camera.restarts = 0;
+      }
+      camera.lastRestartAt = Date.now();
+      camera.restarts = (camera.restarts || 0) + 1;
+      if (camera.restarts > CAMERA_MAX_RESTARTS) {
+        stopCamera();
+        notice('scanError',
+          'The camera keeps stopping. Tap Scan next visitor to try again, or ' +
+          'reload the page.');
+        return;
+      }
 
       camera.restarting = true;
       stopCamera();
