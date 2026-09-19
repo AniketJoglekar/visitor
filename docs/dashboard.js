@@ -97,10 +97,33 @@
     return null;
   }
  
+  /**
+   * Shows or hides the "checking your access" state, hiding the Google button
+   * while it runs. The label escalates so a long wait reads as progress rather
+   * than a hang — a slow content hop plus retries can hold this for half a
+   * minute, and the button previously just sat there.
+   */
+  var signinBusyTimers = [];
+  function setSigninBusy(busy) {
+    signinBusyTimers.forEach(window.clearTimeout);
+    signinBusyTimers = [];
+    el('gsiButton').hidden = !!busy;
+    el('signinBusy').hidden = !busy;
+    if (!busy) return;
+    el('signinBusyLabel').textContent = 'Checking your access\u2026';
+    signinBusyTimers.push(window.setTimeout(function () {
+      el('signinBusyLabel').textContent = 'Still checking \u2014 the server is slow to answer\u2026';
+    }, 6000));
+    signinBusyTimers.push(window.setTimeout(function () {
+      el('signinBusyLabel').textContent = 'Taking longer than usual. Trying again\u2026';
+    }, 20000));
+  }
+
   window.handleCredentialResponse = function (response) {
     session.idToken = response.credential;
     session.expiresAt = expiryOf(response.credential);
     notice('signinError', '');
+    setSigninBusy(true);
     load();
   };
  
@@ -131,6 +154,7 @@
   }
  
   function requireSignIn(message) {
+    setSigninBusy(false);
     // Cancel first. Without this the sign-out timer armed by the previous
     // session still fired and called signOut() again, re-prompting Google.
     if (idleClear) { window.clearTimeout(idleClear); idleClear = null; }
@@ -291,6 +315,7 @@
     post({ action: 'dashboard' }, NETWORK_RETRIES)
       .then(function (data) {
         if (seq !== loadSeq) return;
+        setSigninBusy(false);
         if (!data.ok) {
           // Show the list pane even though there is nothing in it: listError
           // lives inside that pane, so reporting the failure without revealing
@@ -315,6 +340,7 @@
       })
       .catch(function (err) {
         if (seq !== loadSeq) return;
+        setSigninBusy(false);
         el('count').textContent = '';
         if (!err.signedOut) {
           el('paneSignin').hidden = true;

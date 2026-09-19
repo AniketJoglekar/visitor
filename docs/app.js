@@ -973,10 +973,11 @@
     // the button and letting the screen read as a clean ALLOW.
     var warnings = [];
     if (data.warning) warnings.push(data.warning);
-    if (data.replayed) {
-      warnings.push('This is the answer to an earlier attempt that did not come ' +
-                    'back. It has not been counted as a second entry.');
-    }
+    // A replay is not shown to the guard. It means the first request's answer
+    // was lost and the retry collected the decision the server had already
+    // made — an internal recovery, not something they can act on, and an amber
+    // flag beside a valid verdict invites hesitation over a non-problem. Still
+    // counted in the tally, which is where it is actually useful.
     if (allow && !data.hasPhoto) {
       warnings.push('No photograph on file for this pass. Do not admit on it ' +
                     'alone — confirm with the host before letting them through.');

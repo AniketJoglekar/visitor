@@ -100,6 +100,9 @@
     border-top-color:var(--text); border-radius:50%; display:inline-block;
     vertical-align:-3px; animation:spin .7s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
+  .signin-busy { display:flex; align-items:center; gap:10px; margin-top:6px; }
+  .signin-busy .spinner { width:20px; height:20px; border-width:3px; }
+  .signin-busy__label { margin:0; opacity:.75; }
   @media (prefers-reduced-motion: reduce) { .spinner { animation-duration:2.4s; } }
  
   @media (max-width: 560px) {
@@ -131,6 +134,13 @@
     <p class="lede">Only accounts on the Admins list can approve or disapprove a
        pass. Gate staff accounts cannot.</p>
     <div id="gsiButton"></div>
+    <!-- Replaces the Google button while the token is checked. Leaving the
+         button sitting there with nothing happening reads as a dead button,
+         and with retries a slow content hop can hold it for half a minute. -->
+    <div class="signin-busy" id="signinBusy" hidden>
+      <span class="spinner"></span>
+      <p class="signin-busy__label" id="signinBusyLabel">Checking your access…</p>
+    </div>
     <p class="notice notice--bad" id="signinError" hidden></p>
   </section>
  
