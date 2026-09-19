@@ -74,7 +74,20 @@
   // First attempt gives up quickly and asks again; a repeat is cheap because
   // the server replays its stored verdict without touching the sheet. The last
   // attempt is patient, in case the backend genuinely is slow.
-  var ATTEMPT_TIMEOUTS_MS = [8000, 15000, 30000];
+  // Sized from measurement, not guesswork. A working reply is about 4.4s
+  // (script ~2.4s, delivery ~2.0s). Anything still outstanding at 12s is
+  // overwhelmingly likely never to arrive, and the old 30s third attempt spent
+  // half the budget proving that — leaving only 2s for a fourth, which was
+  // shorter than a working reply and therefore doomed before it was sent.
+  //
+  // Several cheap attempts beat a few patient ones here, because the dominant
+  // failure is an instant 404 from the content hop rather than a slow server.
+  var ATTEMPT_TIMEOUTS_MS = [8000, 10000, 12000, 12000, 12000];
+
+  // Never start an attempt that cannot succeed. Below this there is not enough
+  // of the budget left to beat a normal reply, so giving up honestly is better
+  // than a request guaranteed to time out.
+  var MIN_USEFUL_ATTEMPT_MS = 6000;
   var REQUEST_TIMEOUT_MS = ATTEMPT_TIMEOUTS_MS[ATTEMPT_TIMEOUTS_MS.length - 1];
 
   // A photograph is 100-200 KB plus Drive work on a cold cache; a verdict is
@@ -710,13 +723,15 @@
       // Cap this attempt to whatever is left of the budget. Checking the
       // deadline only before starting one let a 4th attempt begin at 59s and
       // run a further 30, so a "60 second" limit produced an 82 second wait.
-      var remaining = Math.max(2000, SCAN_RETRY_DEADLINE_MS - elapsed());
+      var remaining = SCAN_RETRY_DEADLINE_MS - elapsed();
       return post({ action: 'scan', token: token, requestId: requestId },
                   0, attemptNo - 1, remaining, inFlight)
         .catch(function (err) {
           if (err.signedOut || err.rateLimited || givenUp) throw err;
-          if (elapsed() >= SCAN_RETRY_DEADLINE_MS) throw err;
           if (attemptNo >= SCAN_MAX_ATTEMPTS) throw err;
+          // Enough left for an attempt that could actually succeed, not merely
+          // enough to start one.
+          if (SCAN_RETRY_DEADLINE_MS - elapsed() < MIN_USEFUL_ATTEMPT_MS) throw err;
 
           el('checkingStop').hidden = false;
           el('checkingNote').textContent =
@@ -778,7 +793,7 @@
           // fires on this path — and with a reply that arrives quickly, the
           // deadline alone allows an unbounded loop.
           if (!givenUp && attemptNo < SCAN_MAX_ATTEMPTS &&
-              elapsed() < SCAN_RETRY_DEADLINE_MS) {
+              SCAN_RETRY_DEADLINE_MS - elapsed() >= MIN_USEFUL_ATTEMPT_MS) {
             el('checkingStop').hidden = false;
             el('checkingNote').textContent =
               'Reply arrived incomplete \u2014 still asking, attempt ' +
