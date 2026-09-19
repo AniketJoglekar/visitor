@@ -22,7 +22,17 @@
   var el = function (id) { return document.getElementById(id); };
 
   var session = { idToken: null, expiresAt: 0, scanner: null };
-  var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false };
+  var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false,
+                 lastFrameAt: 0, watchdog: null, restarting: false };
+
+  // How long the camera may produce no frames before it is treated as dead.
+  // A phone left on a desk locks its screen, and on several mobile browsers the
+  // OS ends the camera track WITHOUT firing visibilitychange — so the page still
+  // believes it is visible, tick() keeps looping against a dead track, and the
+  // guard picks up a black or frozen viewfinder with no indication anything is
+  // wrong. Nothing noticed that before.
+  var CAMERA_STALL_MS = 10000;
+  var CAMERA_WATCHDOG_MS = 3000;
   var lastToken = { value: null, at: 0 };
   var current = null;
   var checkTimer = null;
@@ -560,6 +570,17 @@
       return video.play();
     }).then(function () {
       camera.running = true;
+      camera.lastFrameAt = Date.now();
+
+      // The track ending is the clean signal when a browser bothers to send it.
+      // The watchdog covers the ones that do not.
+      camera.stream.getTracks().forEach(function (t) {
+        t.addEventListener('ended', function () {
+          if (el('paneScan').hasAttribute('data-active')) camera.lastFrameAt = 0;
+        });
+      });
+      watchCamera();
+
       if (!camera.canvas) {
         camera.canvas = document.createElement('canvas');
         camera.ctx = camera.canvas.getContext('2d', { willReadFrequently: true });
@@ -573,8 +594,44 @@
     });
   }
 
+  /**
+   * Restarts the camera when it has stopped producing frames.
+   *
+   * Deliberately driven by observed frames rather than by events. Track
+   * `ended`, `visibilitychange` and `pagehide` all fire on some devices and not
+   * others; a frame either arrived or it did not, and that is true everywhere.
+   */
+  function watchCamera() {
+    if (camera.watchdog) window.clearInterval(camera.watchdog);
+    camera.watchdog = window.setInterval(function () {
+      if (!camera.running || camera.restarting) return;
+      if (!el('paneScan').hasAttribute('data-active')) return;
+
+      var live = !!camera.stream && camera.stream.getTracks().some(function (t) {
+        return t.readyState === 'live';
+      });
+      // Zero means "no frame since the track ended", which is stalled by
+      // definition. Reading it as falsy skipped the check entirely.
+      var stalled = !camera.lastFrameAt ||
+                    (Date.now() - camera.lastFrameAt > CAMERA_STALL_MS);
+      if (live && !stalled) return;
+
+      camera.restarting = true;
+      stopCamera();
+      startCamera();
+      // After, not before: startCamera() clears scanError as its first action,
+      // so a message set beforehand was wiped by the restart it was announcing.
+      notice('scanError', 'Camera stopped \u2014 restarting it.');
+      window.setTimeout(function () {
+        camera.restarting = false;
+        if (camera.running) notice('scanError', '');
+      }, 2000);
+    }, CAMERA_WATCHDOG_MS);
+  }
+
   function stopCamera() {
     camera.running = false;
+    if (camera.watchdog) { window.clearInterval(camera.watchdog); camera.watchdog = null; }
     if (camera.raf) { cancelAnimationFrame(camera.raf); camera.raf = null; }
     if (camera.stream) {
       camera.stream.getTracks().forEach(function (t) { t.stop(); });
@@ -598,6 +655,7 @@
           (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side,
           0, 0, size, size
         );
+        camera.lastFrameAt = Date.now();
         var image = camera.ctx.getImageData(0, 0, size, size);
         var found = camera.decode(image.data, size, size, { inversionAttempts: 'dontInvert' });
         if (found && found.data) {
