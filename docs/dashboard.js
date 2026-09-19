@@ -29,7 +29,6 @@
   // Escalating, matching the scanner. The backend answers in 3-5 seconds or the
   // reply is not coming, so a flat 30s meant three long waits for nothing.
   var ATTEMPT_TIMEOUTS_MS = [8000, 15000, 30000];
-  var REQUEST_TIMEOUT_MS = ATTEMPT_TIMEOUTS_MS[ATTEMPT_TIMEOUTS_MS.length - 1];
 
   function timeoutForAttempt(n) {
     return ATTEMPT_TIMEOUTS_MS[Math.min(n, ATTEMPT_TIMEOUTS_MS.length - 1)];
@@ -289,6 +288,18 @@
       if (body.charAt(0) !== '{') throw new Error('Unexpected reply from the server.');
       var data;
       try { data = JSON.parse(body); } catch (e) { throw new Error('Server reply was not readable.'); }
+
+      // Computed here, as the scanner does. Without this `sentAt` was recorded
+      // and never read, so describeTiming() reported "No dashboard reply has
+      // ever reached this phone" even while replies were arriving normally —
+      // the defect fixed for the scanner in Round 34 and left on the dashboard.
+      var roundTripMs = Date.now() - sentAt;
+      timings[payload.action] = {
+        roundTripMs: roundTripMs,
+        serverMs: (typeof data.serverMs === 'number') ? data.serverMs : null,
+        deliveryMs: (typeof data.serverMs === 'number') ? roundTripMs - data.serverMs : null
+      };
+
       if (data && data.authError) { requireSignIn(data.error); throw signedOut(data.error); }
       return data;
     }).catch(function (err) {

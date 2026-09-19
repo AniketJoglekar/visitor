@@ -129,7 +129,7 @@
   // of the budget left to beat a normal reply, so giving up honestly is better
   // than a request guaranteed to time out.
   var MIN_USEFUL_ATTEMPT_MS = 6000;
-  var REQUEST_TIMEOUT_MS = ATTEMPT_TIMEOUTS_MS[ATTEMPT_TIMEOUTS_MS.length - 1];
+
 
   // A photograph is 100-200 KB plus Drive work on a cold cache; a verdict is
   // about 1 KB. Giving both the same 8-second first attempt aborted photo
@@ -161,13 +161,24 @@
   // 60-second budget bought almost nothing while a visitor stood waiting. The
   // schedule still fits three attempts.
   var SCAN_RETRY_DEADLINE_MS = 30 * 1000;
+  // Enforced, not merely documented. SCAN_REPLAY_WINDOW_MS previously existed
+  // only as a comment that a test read with a regex — a constant no code
+  // touches is a constant nobody maintains. If the deadline ever grows past the
+  // window the server stores a verdict for, a late retry stops replaying and
+  // starts recording a second entry, which is the defect Round 21 existed to
+  // remove. Fail loudly at load rather than silently at a gate.
+  if (SCAN_RETRY_DEADLINE_MS >= SCAN_REPLAY_WINDOW_MS) {
+    throw new Error('Scanner misconfigured: the retry deadline (' +
+      SCAN_RETRY_DEADLINE_MS + 'ms) must stay inside the server replay window (' +
+      SCAN_REPLAY_WINDOW_MS + 'ms), or a retry will record a second entry.');
+  }
+
   // Pauses between attempts, in order. Escalating so a persistent outage backs
   // off instead of hammering. A hard attempt ceiling sits alongside the time
   // deadline: a fault that fails instantly would otherwise fit hundreds of
   // requests into the window and trip RATE_LIMIT_PER_MIN.
   var RETRY_GAP_MS = [1000, 2000, 3000, 5000, 8000];
   var SCAN_MAX_ATTEMPTS = 8;
-  var SCAN_RETRIES = 2;
 
   // Retries for requests that change nothing and so are safe to repeat.
   var NETWORK_RETRIES = 2;
@@ -357,6 +368,12 @@
     // A new sign-in is a new shift. Carrying the previous guard's counts over
     // would make the figure useless as evidence.
     tally = { attempts: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
+    // Dropped with the rest of the session state. It can hold a raw reply
+    // carrying a visitor's name, and there is no reason for it to survive into
+    // the next guard's shift alongside a photo cache that does not.
+    lastDiagnostic = null;
+    retryPending = null;
+    el('scanRetry').hidden = true;
     clearVerdict();
     purgePhotoCache();
     stopCamera();
