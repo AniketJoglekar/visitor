@@ -772,6 +772,10 @@
     <p class="scan__hint" id="scanHint">Hold the visitor's QR code inside the frame.</p>
   </div>
   <p class="notice" id="scanError" hidden></p>
+  <!-- Offered only after a scan gives up. Re-asks for the same pass with the
+       same request id, so within the replay window it returns the decision the
+       server already made rather than recording a second entry. -->
+  <button class="btn btn--primary" id="scanRetry" hidden>Try this pass again</button>
 </section>
 
 <!-- Verdict -->

@@ -48,11 +48,28 @@
    *
    * Reset on sign-in, never persisted, and shown only on the idle scan screen.
    */
-  var tally = { scans: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
+  var tally = { attempts: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
+
+  /**
+   * The last failure's full diagnostic. Guards do not need it and it is long
+   * enough to push the camera off a phone screen, so it never reaches the
+   * notice. It is logged to the console and can be read on the device by
+   * triple-tapping the scanner's name in the header.
+   */
+  var lastDiagnostic = null;
+
+  /**
+   * The pass a give-up left unresolved, so the Try again button can re-ask for
+   * that same pass with the same request id.
+   */
+  var retryPending = null;
 
   function tallyLine() {
-    if (!tally.scans) return 'Hold the visitor\u2019s QR code inside the frame.';
-    var bits = [tally.scans + (tally.scans === 1 ? ' scan' : ' scans')];
+    if (!tally.attempts) return 'Hold the visitor\u2019s QR code inside the frame.';
+    // Counts every scan attempted, including ones that gave up. Counting only
+    // rendered verdicts understated the rate, because a give-up is precisely
+    // the case worth counting.
+    var bits = [tally.attempts + (tally.attempts === 1 ? ' scan' : ' scans')];
     if (tally.replayed) bits.push(tally.replayed + ' needed a retry');
     if (tally.photoFailed) bits.push(tally.photoFailed + ' without a photo');
     if (tally.gaveUp) bits.push(tally.gaveUp + ' gave up');
@@ -115,7 +132,11 @@
   // ample margin inside the 120, and the deadline is measured from the first
   // attempt, not from the last.
   var SCAN_REPLAY_WINDOW_MS = 120 * 1000;   // must match CONFIG.SCAN_REPLAY_SECONDS
-  var SCAN_RETRY_DEADLINE_MS = 60 * 1000;
+  // 30 seconds, not 60. Measurement says nine of ten failures recover on the
+  // second attempt and the rest rarely recover at all, so the second half of a
+  // 60-second budget bought almost nothing while a visitor stood waiting. The
+  // schedule still fits three attempts.
+  var SCAN_RETRY_DEADLINE_MS = 30 * 1000;
   // Pauses between attempts, in order. Escalating so a persistent outage backs
   // off instead of hammering. A hard attempt ceiling sits alongside the time
   // deadline: a fault that fails instantly would otherwise fit hundreds of
@@ -311,7 +332,7 @@
     lastToken = { value: null, at: 0 };
     // A new sign-in is a new shift. Carrying the previous guard's counts over
     // would make the figure useless as evidence.
-    tally = { scans: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
+    tally = { attempts: 0, replayed: 0, photoFailed: 0, gaveUp: 0 };
     clearVerdict();
     purgePhotoCache();
     stopCamera();
@@ -663,11 +684,17 @@
     return String(Date.now()) + '-' + Math.random().toString(36).substring(2, 12);
   }
 
-  function onCode(token) {
+  function onCode(token, reuseRequestId) {
     var now = Date.now();
-    if (token === lastToken.value && now - lastToken.at < 2500) return;
+    // The duplicate suppressor is skipped for a deliberate retry: the guard has
+    // asked for this exact pass again, which is the case it exists to prevent
+    // the camera doing by itself.
+    if (!reuseRequestId && token === lastToken.value && now - lastToken.at < 2500) return;
     lastToken = { value: token, at: now };
 
+    tally.attempts++;
+    el('scanRetry').hidden = true;
+    retryPending = null;
     resetCheckingOverlay();
     enterCapturedState();
 
@@ -676,7 +703,9 @@
     // replies routinely — the script completes and the phone gets nothing — so
     // without a retry the guard was told to go and read a spreadsheet, and with
     // a naive retry the sheet gained a second admission for one visitor.
-    var requestId = newRequestId();
+    // Reusing the id is what makes a retry free: the server replays its stored
+    // verdict rather than recording a second entry.
+    var requestId = reuseRequestId || newRequestId();
 
     // In parallel, not after the verdict. This is the difference between the
     // guard waiting scan+photo and waiting max(scan, photo).
@@ -810,7 +839,6 @@
           return;
         }
 
-        tally.scans++;
         if (data.replayed) tally.replayed++;
         renderVerdict(data);
         show('paneVerdict');
@@ -823,19 +851,40 @@
      * have been processed, check the ScanLog" was not something a guard can act
      * on with a visitor in front of them. Say what is known, and what to do.
      */
+    /**
+     * Gives up on this scan.
+     *
+     * The guard gets two lines and a button. The full diagnostic — timings,
+     * tally, the raw page that came back — is kept for later rather than
+     * printed: it ran to 1,225 characters, which is about 37 lines on a phone
+     * and pushed the camera below the fold, so the gate became unusable at the
+     * moment it was most needed.
+     */
     function giveUp(detail) {
+      // Counted here, not in fail(): the malformed-reply path calls this
+      // directly, so counting in fail() missed every give-up caused by a reply
+      // that arrived but was unusable.
+      tally.gaveUp++;
       leaveCapturedState();
       el('checkingStop').hidden = true;
+
+      lastDiagnostic =
+        new Date().toISOString() + '\n' +
+        'No answer after ' + Math.round(elapsed() / 1000) + 's, ' +
+        attemptNo + ' attempt' + (attemptNo === 1 ? '' : 's') + '.\n' +
+        describeTiming('scan') + '\n' + tallyLine() + '\n' + (detail || '');
+      try { console.error('[visitor-pass] ' + lastDiagnostic); } catch (ignored) {}
+
       notice('scanError',
-        'No answer after ' + Math.round(elapsed() / 1000) + ' seconds and ' +
-        attemptNo + ' attempt' + (attemptNo === 1 ? '' : 's') + '. ' +
-        'The pass WAS checked \u2014 the decision is recorded in the sheet \u2014 but ' +
-        'the answer did not reach this phone, so it cannot be shown here.\n\n' +
-        'Do not admit on this. Confirm with the host, or ask GAC to look up the ' +
-        'pass. Scanning again is safe: within two minutes it returns the same ' +
-        'decision without counting a second entry.\n\n' +
-        describeTiming('scan') + ' ' + tallyLine() + '.' +
-        (detail ? '\n\n' + detail : ''));
+        'No answer from the server. Do not admit on this.\n' +
+        'Try again below, or confirm with the host.');
+
+      // Offer the same pass, not a fresh scan: the request id is reused, so
+      // within the replay window the server returns the decision it already
+      // made instead of recording a second entry.
+      retryPending = { token: token, requestId: requestId };
+      el('scanRetry').hidden = false;
+
       resumeScanning();
     }
 
@@ -852,7 +901,6 @@
         resumeScanning();
         return;
       }
-      tally.gaveUp++;
       giveUp(err.message || '');
     }
 
@@ -1300,6 +1348,31 @@
   // -------------------------------------------------------------------------
   // Wiring
   // -------------------------------------------------------------------------
+
+  el('scanRetry').addEventListener('click', function () {
+    if (!retryPending) return;
+    var pending = retryPending;
+    el('scanRetry').hidden = true;
+    notice('scanError', '');
+    onCode(pending.token, pending.requestId);
+  });
+
+  /**
+   * Triple-tap the scanner's name to read the last failure in full. Kept off
+   * the guard's screen but reachable on the device, so a fault can be reported
+   * without a laptop.
+   */
+  (function () {
+    var taps = [];
+    el('barWho').addEventListener('click', function () {
+      var now = Date.now();
+      taps = taps.filter(function (t) { return now - t < 1200; });
+      taps.push(now);
+      if (taps.length < 3) return;
+      taps = [];
+      notice('scanError', lastDiagnostic || 'No failure recorded this session.');
+    });
+  })();
 
   el('scanNext').addEventListener('click', function () {
     dropFailedPhotos();
