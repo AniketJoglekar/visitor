@@ -318,6 +318,7 @@
 
   function showModeChooser() {
     mode = { type: null, vehicle: null };
+    el('modeChoices').hidden = false;
     el('modeVehicle').hidden = true;
     el('vehicleNumber').value = '';
     el('modeEntry').removeAttribute('data-chosen');
@@ -349,8 +350,26 @@
    */
   function paintMode() {
     el('scanMode').textContent = mode.type + ' Scan';
-    el('switchMode').textContent =
-      'Switch to ' + (mode.type === 'Entry' ? 'Exit' : 'Entry');
+  }
+
+  /**
+   * Asks for the vehicle number before the next visitor.
+   *
+   * The direction is already chosen, so only the field and Enter are shown —
+   * the Entry/Exit buttons are hidden here. Asking once per visitor rather than
+   * once per shift is what makes the column mean anything: a number entered at
+   * sign-in would otherwise be attached to every visitor scanned afterwards.
+   */
+  function showVehiclePrompt() {
+    if (!mode.type) { showModeChooser(); return; }
+    mode.vehicle = null;
+    el('modeChoices').hidden = true;
+    el('modeVehicle').hidden = false;
+    el('vehicleNumber').value = '';
+    el('modeChosen').textContent = 'You are scanning for ' + mode.type;
+    notice('scanError', '');
+    show('paneMode');
+    el('vehicleNumber').focus();
   }
 
   function startScanning() {
@@ -1522,8 +1541,10 @@
     if (!el('paneVerdict').hasAttribute('data-active')) return;
     clearVerdict();
     purgePhotoCache();
-    show('paneScan');
-    startCamera();
+    // Back to the vehicle prompt, not straight to the camera. The next visitor
+    // needs their own number, and the idle clear is exactly the case where a
+    // different one is about to arrive.
+    showVehiclePrompt();
   }
 
   function touchActivity() {
@@ -1597,11 +1618,9 @@
     // frame and put the same verdict straight back on screen. tick() clears it
     // as soon as the code leaves the frame instead.
     clearVerdict();
-    show('paneScan');
-    // Same wording as resumeScanning(), which this path does not use: it starts
-    // the camera directly rather than resuming an existing stream.
-    el('scanHint').textContent = tallyLine();
-    startCamera();
+    // The camera opens only after the guard has answered the vehicle question
+    // for this visitor.
+    showVehiclePrompt();
   });
 
   el('signOut').addEventListener('click', signOut);

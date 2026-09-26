@@ -312,13 +312,19 @@
   .bar__mode { opacity: .75; }
 
 
+  .scan__modebar {
+    display: flex; align-items: center; gap: 12px;
+    /* Set down from the top edge: flush against it the line read as part of
+       the header bar rather than as a statement about this scan. */
+    margin: 18px 0 14px;
+  }
   .scan__mode {
-    margin: 0 0 12px; padding: 10px 14px; text-align: center;
+    flex: 1; padding: 10px 14px;
     font-size: 19px; font-weight: 700; letter-spacing: .04em;
     border-radius: 10px; background: var(--surface); border: 1px solid var(--line);
   }
   .btn--switch {
-    width: 100%; margin-top: 14px;
+    flex: 0 0 auto; padding: 12px 20px;
     background: #f5b301; color: #1a1400; border: 0; font-weight: 700;
   }
   .mode__choices .btn[data-chosen] { outline: 3px solid currentColor; outline-offset: 2px; }
@@ -789,7 +795,7 @@
      time, and asking per scan would add a tap to every visitor. -->
 <section class="pane pad mode" id="paneMode">
   <h2 class="mode__title">Are you recording entries or exits?</h2>
-  <div class="mode__choices">
+  <div class="mode__choices" id="modeChoices">
     <button class="btn btn--big" id="modeEntry">Entry</button>
     <button class="btn btn--big" id="modeExit">Exit</button>
   </div>
@@ -807,7 +813,10 @@
 </section>
 
 <section class="pane" id="paneScan">
-  <p class="scan__mode" id="scanMode"></p>
+  <div class="scan__modebar">
+    <span class="scan__mode" id="scanMode"></span>
+    <button class="btn btn--switch" id="switchMode">Switch</button>
+  </div>
   <div class="scan">
     <div class="viewport" id="viewport">
       <video id="video" playsinline muted></video>
@@ -828,10 +837,6 @@
        same request id, so within the replay window it returns the decision the
        server already made rather than recording a second entry. -->
   <button class="btn btn--primary" id="scanRetry" hidden>Try this pass again</button>
-  <!-- Deliberately loud. A guard who does not notice they are recording the
-       wrong direction produces a log that is wrong in a way nobody can spot
-       afterwards. -->
-  <button class="btn btn--switch" id="switchMode"></button>
 </section>
 
 <!-- Verdict -->
