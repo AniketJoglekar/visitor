@@ -312,22 +312,40 @@
   .bar__mode { opacity: .75; }
 
 
+  /* The bar spans the full width. The switch sits ON it, at the right, rather
+     than beside it — side by side the bar was squeezed to a square by a button
+     whose width depends on its label. */
   .scan__modebar {
-    display: flex; align-items: center; gap: 12px;
+    position: relative;
     /* Set down from the top edge: flush against it the line read as part of
        the header bar rather than as a statement about this scan. */
     margin: 18px 0 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
   }
   .scan__mode {
-    flex: 1; padding: 10px 14px;
+    display: block;
+    /* Room reserved on the right so a long direction never runs under the
+       button. */
+    padding-right: 22%;
     font-size: 19px; font-weight: 700; letter-spacing: .04em;
-    border-radius: 10px; background: var(--surface); border: 1px solid var(--line);
   }
   .btn--switch {
-    flex: 0 0 auto; padding: 12px 20px;
-    background: #f5b301; color: #1a1400; border: 0; font-weight: 700;
+    position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+    max-width: 20%; padding: 8px 0; width: 20%;
+    font-size: 14px; font-weight: 700;
+    background: #f5b301; color: #1a1400; border: 0; border-radius: 8px;
   }
-  .mode__choices .btn[data-chosen] { outline: 3px solid currentColor; outline-offset: 2px; }
+
+  /* Equal size regardless of label length, and visually distinct from each
+     other without borrowing the verdict palette: green means ALLOW and red
+     means DENY elsewhere, so neither is used here. */
+  .mode__choices .btn { flex: 1 1 0; min-width: 0; }
+  #modeEntry { background: #1f6feb; color: #fff; }
+  #modeExit  { background: #8250df; color: #fff; }
+  .mode__choices .btn[data-chosen] { outline: 3px solid #fff; outline-offset: 2px; }
 
   .checking__note {
     margin: 0;
@@ -794,7 +812,7 @@
      between sign-in and the camera because a guard works one direction at a
      time, and asking per scan would add a tap to every visitor. -->
 <section class="pane pad mode" id="paneMode">
-  <h2 class="mode__title">Are you recording entries or exits?</h2>
+  <h2 class="mode__title" id="modeTitle">Are you recording entries or exits?</h2>
   <div class="mode__choices" id="modeChoices">
     <button class="btn btn--big" id="modeEntry">Entry</button>
     <button class="btn btn--big" id="modeExit">Exit</button>

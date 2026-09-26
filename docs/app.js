@@ -19,7 +19,24 @@
   var framebust = document.getElementById('framebust');
   if (framebust && framebust.parentNode) framebust.parentNode.removeChild(framebust);
 
-  var el = function (id) { return document.getElementById(id); };
+  /**
+   * An element by id, or a stated reason why not.
+   *
+   * Returning null here produced "Cannot set properties of null (setting
+   * 'hidden')" at a gate, which names neither the element nor the cause. The
+   * cause is almost always the same: app.js and index.html were published
+   * separately, so the script is asking for something the page does not have.
+   * Say that instead.
+   */
+  var el = function (id) {
+    var node = document.getElementById(id);
+    if (!node) {
+      throw new Error('This page is out of date: index.html has no "' + id +
+                      '". Republish index.html and app.js together \u2014 they ' +
+                      'must come from the same release.');
+    }
+    return node;
+  };
 
   var session = { idToken: null, expiresAt: 0, scanner: null };
   var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false,
@@ -318,6 +335,7 @@
 
   function showModeChooser() {
     mode = { type: null, vehicle: null };
+    el('modeTitle').hidden = false;
     el('modeChoices').hidden = false;
     el('modeVehicle').hidden = true;
     el('vehicleNumber').value = '';
@@ -363,6 +381,9 @@
   function showVehiclePrompt() {
     if (!mode.type) { showModeChooser(); return; }
     mode.vehicle = null;
+    // The chooser's question does not belong here: the direction is settled and
+    // asking it again invites a guard to think they must answer it.
+    el('modeTitle').hidden = true;
     el('modeChoices').hidden = true;
     el('modeVehicle').hidden = false;
     el('vehicleNumber').value = '';
