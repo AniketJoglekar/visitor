@@ -303,7 +303,17 @@
      of the screen, where a thumb reaches it, rather than at the top edge. */
   .mode { justify-content: center; }
 
-  .mode__choices { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  /* The ROW is given the height, not the buttons. A grid row is one height by
+     definition, so two cells in it cannot differ however their contents are
+     sized — which setting min-height on the buttons themselves did not
+     guarantee in the field. */
+  .mode__choices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-auto-rows: 116px;
+    align-items: stretch;
+    gap: 14px;
+  }
   .btn--big { padding: 26px 12px; font-size: 20px; font-weight: 700; }
   .mode__vehicle { margin-top: 26px; }
   .mode__chosen { margin: 0 0 14px; opacity: .75; }
@@ -353,8 +363,8 @@
      grid stretch left the two buttons visibly different heights, and a fixed
      min-height with the label centred cannot differ whatever the text does. */
   .mode__choices .btn {
-    width: 100%; min-width: 0; box-sizing: border-box;
-    min-height: 116px; padding: 0 12px;
+    width: 100%; height: 100%; min-width: 0; box-sizing: border-box;
+    padding: 0 12px; margin: 0;
     display: flex; align-items: center; justify-content: center;
   }
   #modeEntry { background: #1f6feb; color: #fff; }
