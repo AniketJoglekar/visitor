@@ -362,10 +362,17 @@
   /* Width comes from the grid column; height is stated outright. Relying on
      grid stretch left the two buttons visibly different heights, and a fixed
      min-height with the label centred cannot differ whatever the text does. */
+  /* Centred by line-height, not by flex.
+     Safari wraps a <button>'s contents in an anonymous box and does not
+     reliably honour align-items on the button itself, which is how two boxes
+     of identical height ended up with their labels at different levels.
+     line-height equal to the height centres a single-line label in every
+     browser, with nothing to resolve. */
   .mode__choices .btn {
-    width: 100%; height: 100%; min-width: 0; box-sizing: border-box;
+    width: 100%; height: 116px; min-width: 0; box-sizing: border-box;
     padding: 0 12px; margin: 0;
-    display: flex; align-items: center; justify-content: center;
+    display: block; line-height: 116px; text-align: center;
+    white-space: nowrap; overflow: hidden;
   }
   #modeEntry { background: #1f6feb; color: #fff; }
   #modeExit  { background: #8250df; color: #fff; }
