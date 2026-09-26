@@ -294,6 +294,23 @@
     font-variant-numeric: tabular-nums;
   }
 
+
+  .mode__title { font-size: 20px; margin: 0 0 20px; }
+  .mode__choices { display: flex; gap: 14px; }
+  .btn--big { flex: 1; padding: 26px 12px; font-size: 20px; font-weight: 700; }
+  .mode__vehicle { margin-top: 26px; }
+  .mode__chosen { margin: 0 0 14px; opacity: .75; }
+  .mode__label { display: block; margin-bottom: 8px; font-weight: 600; }
+  .mode__input {
+    width: 100%; box-sizing: border-box; padding: 14px;
+    font-size: 18px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--text);
+    text-transform: uppercase;
+  }
+  .mode__vehicle .btn { width: 100%; margin-top: 14px; }
+  .btn--quiet { background: transparent; border: 1px solid currentColor; opacity: .8; }
+  .bar__mode { opacity: .75; }
+
   .checking__note {
     margin: 0;
     font-size: 14px;
@@ -733,6 +750,7 @@
     <span class="bar__mark-sub">Visitor Pass Scanner</span>
   </span>
   <span class="bar__who" id="barWho" hidden></span>
+  <span class="bar__mode" id="barMode" hidden></span>
   <button class="bar__out" id="signOut" hidden>Sign out</button>
 </header>
 
@@ -755,6 +773,27 @@
 </section>
 
 <!-- Camera -->
+<!-- Chosen once per sign-in, then applied to every scan in the session. It sits
+     between sign-in and the camera because a guard works one direction at a
+     time, and asking per scan would add a tap to every visitor. -->
+<section class="pane pad mode" id="paneMode">
+  <h2 class="mode__title">Are you recording entries or exits?</h2>
+  <div class="mode__choices">
+    <button class="btn btn--big" id="modeEntry">Entry</button>
+    <button class="btn btn--big" id="modeExit">Exit</button>
+  </div>
+
+  <div class="mode__vehicle" id="modeVehicle" hidden>
+    <p class="mode__chosen" id="modeChosen"></p>
+    <label class="mode__label" for="vehicleNumber">Vehicle number (if any)</label>
+    <input class="mode__input" id="vehicleNumber" type="text" autocomplete="off"
+           autocapitalize="characters" spellcheck="false" maxlength="40"
+           placeholder="Leave blank if none">
+    <button class="btn btn--primary" id="modeEnter">Enter</button>
+    <button class="btn btn--quiet" id="modeBack">Change</button>
+  </div>
+</section>
+
 <section class="pane" id="paneScan">
   <div class="scan">
     <div class="viewport" id="viewport">

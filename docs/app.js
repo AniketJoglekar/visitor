@@ -24,7 +24,7 @@
   var session = { idToken: null, expiresAt: 0, scanner: null };
   var camera = { stream: null, raf: null, canvas: null, ctx: null, running: false,
                  lastFrameAt: 0, watchdog: null, restarting: false,
-                 restarts: 0, lastRestartAt: 0 };
+                 restarts: 0, lastRestartAt: 0, starting: false, generation: 0 };
 
   // How long the camera may produce no frames before it is treated as dead.
   // A phone left on a desk locks its screen, and on several mobile browsers the
@@ -239,7 +239,7 @@
   // Panes
   // -------------------------------------------------------------------------
 
-  var PANES = ['paneSignin', 'paneScan', 'paneVerdict'];
+  var PANES = ['paneSignin', 'paneMode', 'paneScan', 'paneVerdict'];
 
   function show(id) {
     PANES.forEach(function (p) {
@@ -297,13 +297,65 @@
       el('barWho').hidden = false;
       el('signOut').hidden = false;
       touchActivity();
-      show('paneScan');
-      startCamera();
+      // The camera does not start here any more. A guard chooses a direction
+      // and records a vehicle first; startCamera() runs when they press Enter.
+      showModeChooser();
     }).catch(function (err) {
       setSigninBusy(false);
       notice('signinError', String(err.message || err));
     });
   };
+
+  /**
+   * The direction the guard is recording and the vehicle they noted, chosen
+   * once per sign-in and sent with every scan.
+   *
+   * Session-scoped deliberately: a guard works one direction at a time, and
+   * asking per scan would add a tap for every visitor. Cleared on sign-out, so
+   * the next guard cannot inherit the previous one's choice.
+   */
+  var mode = { type: null, vehicle: null };
+
+  function showModeChooser() {
+    mode = { type: null, vehicle: null };
+    el('modeVehicle').hidden = true;
+    el('vehicleNumber').value = '';
+    el('barMode').hidden = true;
+    el('barMode').textContent = '';
+    notice('scanError', '');
+    show('paneMode');
+  }
+
+  function chooseMode(type) {
+    mode.type = type;
+    el('modeChosen').textContent = 'Recording ' + type.toLowerCase() +
+                                   ' \u2014 change if that is wrong.';
+    el('modeVehicle').hidden = false;
+    el('vehicleNumber').focus();
+  }
+
+  function startScanning() {
+    // Upper-cased here, not left to CSS. The field is displayed with
+    // text-transform: uppercase, which changes only what is drawn — .value is
+    // whatever was typed. Meanwhile autocapitalize="characters" DOES change the
+    // value, but only on a mobile keyboard and never for pasted text. The
+    // result was that the same plate was stored one way from a phone and
+    // another from a desktop, splitting one vehicle into two when the column is
+    // sorted. Normalising here makes what is stored equal what was shown, on
+    // every device.
+    var typed = String(el('vehicleNumber').value || '').trim().toUpperCase();
+    // Blank stays blank on the wire. The server turns it into "0", so the
+    // meaning of an unanswered field is decided in one place rather than two.
+    mode.vehicle = typed;
+    el('vehicleNumber').value = typed;
+
+    el('barMode').textContent = mode.type +
+      (typed ? ' \u00b7 ' + typed : '');
+    el('barMode').hidden = false;
+
+    show('paneScan');
+    startCamera();
+  }
 
   function expiryOf(jwt) {
     try {
@@ -373,6 +425,9 @@
     // the next guard's shift alongside a photo cache that does not.
     lastDiagnostic = null;
     retryPending = null;
+    mode = { type: null, vehicle: null };
+    el('barMode').hidden = true;
+    el('barMode').textContent = '';
     el('scanRetry').hidden = true;
     clearVerdict();
     purgePhotoCache();
@@ -570,6 +625,21 @@
   // -------------------------------------------------------------------------
 
   function startCamera() {
+    // Re-entrancy guard. getUserMedia is asynchronous, and ten call sites reach
+    // this — including a large Enter button that a guard can easily double-tap
+    // on a phone. Two calls landing before the first resolves acquired two
+    // streams and left the first one's tracks running: an orphaned camera
+    // nothing reads, draining the battery with the recording indicator lit.
+    if (camera.starting) return;
+
+    // Anything already open is released first. The same double-tap otherwise
+    // overwrote camera.stream and lost the handle needed to stop it.
+    if (camera.stream) {
+      try { camera.stream.getTracks().forEach(function (t) { t.stop(); }); }
+      catch (ignored) { /* already gone */ }
+      camera.stream = null;
+    }
+
     notice('scanError', '');
     leaveCapturedState();
     // One source for this line. It was written literally in three places, so
@@ -590,16 +660,28 @@
       return;
     }
 
+    camera.starting = true;
+    // getUserMedia can resolve after stopCamera() has run — the guard signs
+    // out, or the page is hidden, while the permission prompt is still open.
+    // Without this the stream arrives afterwards and starts a camera nobody
+    // asked for, with no handle held to stop it.
+    var generation = camera.generation;
     navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
       audio: false
     }).then(function (stream) {
+      if (generation !== camera.generation) {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        camera.starting = false;
+        throw new Error('__stale__');
+      }
       camera.stream = stream;
       var video = el('video');
       video.srcObject = stream;
       video.setAttribute('playsinline', '');
       return video.play();
     }).then(function () {
+      camera.starting = false;
       camera.running = true;
       camera.lastFrameAt = Date.now();
 
@@ -618,6 +700,11 @@
       }
       tick();
     }).catch(function (err) {
+      // Cleared here too. Left set on a refusal, the guard could never start
+      // the camera again without reloading — a worse outcome than the double
+      // tap this guard exists to prevent.
+      camera.starting = false;
+      if (err && err.message === '__stale__') return;   // asked to stop; not a fault
       var message = (err && err.name === 'NotAllowedError')
         ? 'Camera access was blocked. Allow the camera in your browser settings, then reload.'
         : 'Camera could not start: ' + (err && err.message ? err.message : err);
@@ -679,6 +766,10 @@
   }
 
   function stopCamera() {
+    // Invalidates any getUserMedia still in flight, so its stream is discarded
+    // rather than started after the fact.
+    camera.generation++;
+    camera.starting = false;
     camera.running = false;
     if (camera.watchdog) { window.clearInterval(camera.watchdog); camera.watchdog = null; }
     if (camera.raf) { cancelAnimationFrame(camera.raf); camera.raf = null; }
@@ -833,7 +924,8 @@
       // deadline only before starting one let a 4th attempt begin at 59s and
       // run a further 30, so a "60 second" limit produced an 82 second wait.
       var remaining = SCAN_RETRY_DEADLINE_MS - elapsed();
-      return post({ action: 'scan', token: token, requestId: requestId },
+      return post({ action: 'scan', token: token, requestId: requestId,
+                    type: mode.type, vehicle: mode.vehicle },
                   0, attemptNo - 1, remaining)
         .catch(function (err) {
           if (err.signedOut || err.rateLimited) throw err;
@@ -1146,7 +1238,8 @@
       // One retry point only. An earlier version retried inside both the then
       // and the catch, so each failure branched twice and a budget of 2 turned
       // into 7 requests. The payload check throws; the catch decides.
-      return post({ action: 'photo', token: token }).then(function (data) {
+      return post({ action: 'photo', token: token,
+                    type: mode.type, vehicle: mode.vehicle }).then(function (data) {
         if (!data.ok) throw new Error(data.error || 'Photograph unavailable.');
         var ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
         var badMime = ALLOWED.indexOf(data.mime) === -1;
@@ -1461,6 +1554,18 @@
       notice('scanError', lastDiagnostic || 'No failure recorded this session.');
     });
   })();
+
+  el('modeEntry').addEventListener('click', function () { chooseMode('Entry'); });
+  el('modeExit').addEventListener('click', function () { chooseMode('Exit'); });
+  el('modeEnter').addEventListener('click', startScanning);
+  el('modeBack').addEventListener('click', showModeChooser);
+
+  // Enter on the keyboard does what the Enter button does. A guard holding a
+  // phone one-handed should not have to reach for a button they can already
+  // see the keyboard covering.
+  el('vehicleNumber').addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') { event.preventDefault(); startScanning(); }
+  });
 
   el('scanNext').addEventListener('click', function () {
     dropFailedPhotos();
