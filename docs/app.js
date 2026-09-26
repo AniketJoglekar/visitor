@@ -353,6 +353,7 @@
    */
   function chooseMode(type) {
     mode.type = type;
+    el('modeChosen').hidden = false;
     el('modeChosen').textContent = 'You are scanning for ' + type;
     el('modeEntry').removeAttribute('data-chosen');
     el('modeExit').removeAttribute('data-chosen');
@@ -383,7 +384,10 @@
     el('modeChoices').hidden = true;
     el('modeVehicle').hidden = false;
     el('vehicleNumber').value = '';
-    el('modeChosen').textContent = 'You are scanning for ' + mode.type;
+    // No direction line here. The banner above the camera already states it,
+    // and repeating it on a prompt that only asks for a vehicle number reads as
+    // something to answer rather than something to note.
+    el('modeChosen').hidden = true;
     notice('scanError', '');
     show('paneMode');
     el('vehicleNumber').focus();
