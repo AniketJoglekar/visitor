@@ -311,6 +311,18 @@
   .btn--quiet { background: transparent; border: 1px solid currentColor; opacity: .8; }
   .bar__mode { opacity: .75; }
 
+
+  .scan__mode {
+    margin: 0 0 12px; padding: 10px 14px; text-align: center;
+    font-size: 19px; font-weight: 700; letter-spacing: .04em;
+    border-radius: 10px; background: var(--surface); border: 1px solid var(--line);
+  }
+  .btn--switch {
+    width: 100%; margin-top: 14px;
+    background: #f5b301; color: #1a1400; border: 0; font-weight: 700;
+  }
+  .mode__choices .btn[data-chosen] { outline: 3px solid currentColor; outline-offset: 2px; }
+
   .checking__note {
     margin: 0;
     font-size: 14px;
@@ -750,7 +762,6 @@
     <span class="bar__mark-sub">Visitor Pass Scanner</span>
   </span>
   <span class="bar__who" id="barWho" hidden></span>
-  <span class="bar__mode" id="barMode" hidden></span>
   <button class="bar__out" id="signOut" hidden>Sign out</button>
 </header>
 
@@ -784,17 +795,19 @@
   </div>
 
   <div class="mode__vehicle" id="modeVehicle" hidden>
+    <!-- The two buttons above stay live, so switching is one tap and no
+         separate Change control is needed. -->
     <p class="mode__chosen" id="modeChosen"></p>
     <label class="mode__label" for="vehicleNumber">Vehicle number (if any)</label>
     <input class="mode__input" id="vehicleNumber" type="text" autocomplete="off"
            autocapitalize="characters" spellcheck="false" maxlength="40"
            placeholder="Leave blank if none">
     <button class="btn btn--primary" id="modeEnter">Enter</button>
-    <button class="btn btn--quiet" id="modeBack">Change</button>
   </div>
 </section>
 
 <section class="pane" id="paneScan">
+  <p class="scan__mode" id="scanMode"></p>
   <div class="scan">
     <div class="viewport" id="viewport">
       <video id="video" playsinline muted></video>
@@ -815,6 +828,10 @@
        same request id, so within the replay window it returns the decision the
        server already made rather than recording a second entry. -->
   <button class="btn btn--primary" id="scanRetry" hidden>Try this pass again</button>
+  <!-- Deliberately loud. A guard who does not notice they are recording the
+       wrong direction produces a log that is wrong in a way nobody can spot
+       afterwards. -->
+  <button class="btn btn--switch" id="switchMode"></button>
 </section>
 
 <!-- Verdict -->

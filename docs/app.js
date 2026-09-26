@@ -320,18 +320,37 @@
     mode = { type: null, vehicle: null };
     el('modeVehicle').hidden = true;
     el('vehicleNumber').value = '';
-    el('barMode').hidden = true;
-    el('barMode').textContent = '';
+    el('modeEntry').removeAttribute('data-chosen');
+    el('modeExit').removeAttribute('data-chosen');
     notice('scanError', '');
     show('paneMode');
   }
 
+  /**
+   * Records the direction and states it plainly above the vehicle field.
+   *
+   * The two buttons stay live afterwards, so changing the answer is one tap on
+   * the other one. That replaced a separate Change control, which was a third
+   * button doing what the first two already could.
+   */
   function chooseMode(type) {
     mode.type = type;
-    el('modeChosen').textContent = 'Recording ' + type.toLowerCase() +
-                                   ' \u2014 change if that is wrong.';
+    el('modeChosen').textContent = 'You are scanning for ' + type;
+    el('modeEntry').removeAttribute('data-chosen');
+    el('modeExit').removeAttribute('data-chosen');
+    el(type === 'Entry' ? 'modeEntry' : 'modeExit').setAttribute('data-chosen', '');
     el('modeVehicle').hidden = false;
     el('vehicleNumber').focus();
+  }
+
+  /**
+   * Keeps the banner above the camera and the switch button below it in step
+   * with the direction being recorded.
+   */
+  function paintMode() {
+    el('scanMode').textContent = mode.type + ' Scan';
+    el('switchMode').textContent =
+      'Switch to ' + (mode.type === 'Entry' ? 'Exit' : 'Entry');
   }
 
   function startScanning() {
@@ -349,10 +368,7 @@
     mode.vehicle = typed;
     el('vehicleNumber').value = typed;
 
-    el('barMode').textContent = mode.type +
-      (typed ? ' \u00b7 ' + typed : '');
-    el('barMode').hidden = false;
-
+    paintMode();
     show('paneScan');
     startCamera();
   }
@@ -426,8 +442,6 @@
     lastDiagnostic = null;
     retryPending = null;
     mode = { type: null, vehicle: null };
-    el('barMode').hidden = true;
-    el('barMode').textContent = '';
     el('scanRetry').hidden = true;
     clearVerdict();
     purgePhotoCache();
@@ -1558,7 +1572,16 @@
   el('modeEntry').addEventListener('click', function () { chooseMode('Entry'); });
   el('modeExit').addEventListener('click', function () { chooseMode('Exit'); });
   el('modeEnter').addEventListener('click', startScanning);
-  el('modeBack').addEventListener('click', showModeChooser);
+
+  // Switching mid-shift, without signing out. Only the direction changes: the
+  // vehicle number stays as entered, because it describes the vehicle a guard
+  // is working through rather than a single visitor.
+  el('switchMode').addEventListener('click', function () {
+    if (!mode.type) return;
+    mode.type = (mode.type === 'Entry') ? 'Exit' : 'Entry';
+    paintMode();
+    touchActivity();
+  });
 
   // Enter on the keyboard does what the Enter button does. A guard holding a
   // phone one-handed should not have to reach for a button they can already
