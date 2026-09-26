@@ -670,7 +670,16 @@
     padding: clamp(6px, 1.6vh, 14px) 20px clamp(8px, 2vh, 18px);
   }
 
+  /* Spacing for buttons STACKED one above another. */
   .btn + .btn { margin-top: 10px; }
+
+  /* ...but not for buttons sitting side by side in a grid. This rule is
+     declared after the one above and is more specific, because otherwise the
+     second button in the row — Exit — inherits a 10px top margin and sits
+     lower than the first. Inside a fixed-height row it also leaves the item
+     10px shorter, which is how the same rule produced both a height difference
+     and an alignment difference. The grid's own gap handles the spacing here. */
+  .mode__choices .btn + .btn { margin-top: 0; }
 
   /* Secondary on purpose. Gate staff have no use for the dashboard and are
      refused by it; this is here for the security head who opens the scanner
