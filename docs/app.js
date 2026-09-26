@@ -335,7 +335,6 @@
 
   function showModeChooser() {
     mode = { type: null, vehicle: null };
-    el('modeTitle').hidden = false;
     el('modeChoices').hidden = false;
     el('modeVehicle').hidden = true;
     el('vehicleNumber').value = '';
@@ -381,9 +380,6 @@
   function showVehiclePrompt() {
     if (!mode.type) { showModeChooser(); return; }
     mode.vehicle = null;
-    // The chooser's question does not belong here: the direction is settled and
-    // asking it again invites a guard to think they must answer it.
-    el('modeTitle').hidden = true;
     el('modeChoices').hidden = true;
     el('modeVehicle').hidden = false;
     el('vehicleNumber').value = '';

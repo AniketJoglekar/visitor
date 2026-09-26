@@ -295,11 +295,14 @@
   }
 
 
-  .mode__title { font-size: 20px; margin: 0 0 20px; }
   /* A grid with two explicitly equal columns, not flex. .btn carries
      width: 100% and its own padding, and letting the browser resolve a flex
      basis against those produced two buttons of visibly different widths.
      1fr 1fr is equal by definition, whatever the labels or padding are. */
+  /* The pane is already a flex column; centring puts the choice in the middle
+     of the screen, where a thumb reaches it, rather than at the top edge. */
+  .mode { justify-content: center; }
+
   .mode__choices { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .btn--big { padding: 26px 12px; font-size: 20px; font-weight: 700; }
   .mode__vehicle { margin-top: 26px; }
@@ -346,8 +349,14 @@
   /* Equal size regardless of label length, and visually distinct from each
      other without borrowing the verdict palette: green means ALLOW and red
      means DENY elsewhere, so neither is used here. */
-  /* box-sizing so the padding cannot push a cell wider than its column. */
-  .mode__choices .btn { width: 100%; min-width: 0; box-sizing: border-box; }
+  /* Width comes from the grid column; height is stated outright. Relying on
+     grid stretch left the two buttons visibly different heights, and a fixed
+     min-height with the label centred cannot differ whatever the text does. */
+  .mode__choices .btn {
+    width: 100%; min-width: 0; box-sizing: border-box;
+    min-height: 116px; padding: 0 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
   #modeEntry { background: #1f6feb; color: #fff; }
   #modeExit  { background: #8250df; color: #fff; }
   .mode__choices .btn[data-chosen] { outline: 3px solid #fff; outline-offset: 2px; }
@@ -817,7 +826,6 @@
      between sign-in and the camera because a guard works one direction at a
      time, and asking per scan would add a tap to every visitor. -->
 <section class="pane pad mode" id="paneMode">
-  <h2 class="mode__title" id="modeTitle">Are you recording entries or exits?</h2>
   <div class="mode__choices" id="modeChoices">
     <button class="btn btn--big" id="modeEntry">Entry</button>
     <button class="btn btn--big" id="modeExit">Exit</button>
