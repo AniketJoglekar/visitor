@@ -118,6 +118,9 @@
   .choice legend { padding:0; margin-bottom:4px; }
   .choice .file { margin:8px 0 0; color:var(--text); line-height:1.5; }
   .choice strong { font-weight:600; }
+  /* Operator-chosen wording for the upload choices and the check screen,
+     set apart in the brass accent (Round 65). */
+  .emph { color:var(--brass); }
   .pick { width:18px; height:18px; margin:0 12px 0 0; flex:0 0 auto; accent-color:var(--brass); }
   .row__head { display:flex; align-items:center; min-width:0; }
   .edit { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
@@ -208,9 +211,9 @@
         <fieldset class="choice" id="uploadMode">
           <legend class="count">What should this file do?</legend>
           <label class="file"><input type="radio" name="uploadMode" id="modeMerge" checked>
-            <strong>Add to or update my list.</strong> Anyone already on it who is not in the file stays.</label>
+            <strong>Add to or update my list.</strong> <span class="emph">Only adds addresses and dates to existing list</span></label>
           <label class="file"><input type="radio" name="uploadMode" id="modeReplace">
-            <strong>Replace my whole list.</strong> Anyone on it who is not in the file is removed.</label>
+            <strong>Replace my whole list.</strong> <span class="emph">Fully replaces existing list and old data is lost. Passes revoked for those not present in new list.</span></label>
         </fieldset>
         <label class="file">Choose your CSV file
           <input type="file" id="csvFile" accept=".csv,text/csv">

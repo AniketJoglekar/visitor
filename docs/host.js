@@ -775,17 +775,21 @@
     problems.innerHTML = '';
     if (upload.fatal) {
       el('checkTitle').textContent = upload.fatal;
+      // A file error is not the confirmation question: normal colour.
+      el('checkTitle').classList.remove('emph');
       el('checkGrace').textContent = '';
+      el('checkGrace').hidden = true;
       problems.hidden = true;
       el('saveList').hidden = true;
       return;
     }
     el('saveList').hidden = !upload.entries.length;
-    el('checkTitle').textContent = 'Read ' + upload.entries.length + ' address(es) from ' +
-      upload.fileName + (upload.problems.length ? '; ' + upload.problems.length +
-      ' row(s) cannot be saved' : '') + '. Check the dates, then save.';
-    el('checkGrace').textContent = 'Each visitor may arrive up to ' + data.graceDays +
-      ' day(s) before their range starts and leave up to ' + data.graceDays + ' day(s) after it ends.';
+    // Operator's wording (Round 65). The count and file name it replaced are
+    // still visible below: per-range counts, and each problem row listed.
+    el('checkTitle').textContent = 'Following changes are being made to existing list. Are you sure?';
+    el('checkTitle').classList.add('emph');
+    el('checkGrace').textContent = '';
+    el('checkGrace').hidden = true;
 
     var groups = {};
     upload.entries.forEach(function (e) {
