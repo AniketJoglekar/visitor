@@ -11,7 +11,7 @@
   var el = function (id) { return document.getElementById(id); };
 
   var session = { idToken: null, expiresAt: 0, host: null };
-  var data = { visitors: [], entries: [], graceDays: 1 };
+  var data = { visitors: [], entries: [] };
   var view = 'waiting';
   var listFilter = 'all';
   var loadSeq = 0;
@@ -140,7 +140,7 @@
     // loaded: false blocks "replace my whole list" until the list is fetched
     // again: previewing removals against an empty copy would promise that
     // nobody is removed while the server removed everyone.
-    data = { visitors: [], entries: [], graceDays: data.graceDays, loaded: false, outdated: false };
+    data = { visitors: [], entries: [], loaded: false, outdated: false };
     notice('serverWarning', '');
     upload = null;
     selected = {};
@@ -282,7 +282,6 @@
         el('signOut').hidden = false;
         if (!keep) notice('mainError', '');
         data = { visitors: reply.visitors || [], entries: reply.entries || [],
-                 graceDays: typeof reply.graceDays === 'number' ? reply.graceDays : 1,
                  loaded: true,
                  outdated: !(typeof reply.apiRound === 'number' && reply.apiRound >= REQUIRED_API_ROUND) };
         notice('serverWarning', data.outdated
@@ -777,8 +776,6 @@
       el('checkTitle').textContent = upload.fatal;
       // A file error is not the confirmation question: normal colour.
       el('checkTitle').classList.remove('emph');
-      el('checkGrace').textContent = '';
-      el('checkGrace').hidden = true;
       problems.hidden = true;
       el('saveList').hidden = true;
       return;
@@ -788,8 +785,6 @@
     // still visible below: per-range counts, and each problem row listed.
     el('checkTitle').textContent = 'Following changes are being made to existing list. Are you sure?';
     el('checkTitle').classList.add('emph');
-    el('checkGrace').textContent = '';
-    el('checkGrace').hidden = true;
 
     var groups = {};
     upload.entries.forEach(function (e) {
@@ -918,6 +913,10 @@
 
   function outcomeWords(r) {
     if (r.error) return 'Not saved: ' + r.error;
+    // Round 71: an address listed twice. The server keeps the later row and
+    // returns the earlier with only a note — skipped, not refused. It read
+    // "Saved; saved (...)" before.
+    if (!r.saved && r.note) return 'Skipped: ' + r.note;
     var o = r.outcome || 'saved';
     var words = o === 'approved' ? 'Saved; approved, pass emailed'
               : o === 'no request yet' ? 'Saved; no request from them yet'
@@ -1005,7 +1004,11 @@
             var r = (reply.results || [])[i] || { error: 'no answer for this row' };
             upload.status[e.row] = outcomeWords(r);
             if (r.saved) saved++;
-            else refusedRows.push({ row: e.row + 1, email: e.email, error: r.error || 'not saved' });
+            // A duplicate the server skipped for its later row is not a
+            // refusal (Round 71): counting it as one made any list with an
+            // address twice impossible to replace. The later row carries the
+            // address, and its upload tag, so pruning cannot drop it.
+            else if (r.error || !r.note) refusedRows.push({ row: e.row + 1, email: e.email, error: r.error || 'not saved' });
           });
           done++;
           return next();
