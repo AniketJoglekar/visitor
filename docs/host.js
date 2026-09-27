@@ -18,6 +18,9 @@
   // The file as read, what could be saved from it, and — after saving — what
   // happened to each row. Held so the host can download their file back.
   var upload = null;
+  // Round 61: Your list selections (by address) and the entry being edited.
+  var selected = {};
+  var editing = null;
 
   var IDLE_CLEAR_MS = 5 * 60 * 1000;
   var IDLE_SIGNOUT_MS = 20 * 60 * 1000;
@@ -126,8 +129,13 @@
 
   /** Removes every visitor detail from memory and the screen. */
   function clearData() {
-    data = { visitors: [], entries: [], graceDays: data.graceDays };
+    // loaded: false blocks "replace my whole list" until the list is fetched
+    // again: previewing removals against an empty copy would promise that
+    // nobody is removed while the server removed everyone.
+    data = { visitors: [], entries: [], graceDays: data.graceDays, loaded: false };
     upload = null;
+    selected = {};
+    editing = null;
     ['waitingList', 'listRows', 'visitorsList', 'checkRanges', 'checkProblems'].forEach(function (id) {
       el(id).innerHTML = '';
     });
@@ -259,7 +267,8 @@
         el('signOut').hidden = false;
         if (!keep) notice('mainError', '');
         data = { visitors: reply.visitors || [], entries: reply.entries || [],
-                 graceDays: typeof reply.graceDays === 'number' ? reply.graceDays : 1 };
+                 graceDays: typeof reply.graceDays === 'number' ? reply.graceDays : 1,
+                 loaded: true };
         render();
         touchActivity();
       })
@@ -302,6 +311,24 @@
     if (/^Declined by host/.test(t)) return 'Declined by you';
     if (/^Declined: dates/.test(t)) return 'Declined: dates outside your list';
     return '';
+  }
+
+  /**
+   * The address as the server compares it — Code.gs matchKey(). Used only to
+   * PREVIEW which entries a file changes or would drop; the server decides.
+   * t-claims.js checks the two agree.
+   */
+  function matchKey(address) {
+    var a = String(address || '').trim().replace(/^'/, '').toLowerCase();
+    var at = a.lastIndexOf('@');
+    if (at < 1) return a;
+    var local = a.substring(0, at);
+    var domain = a.substring(at + 1);
+    if (domain === 'gmail.com' || domain === 'googlemail.com') {
+      local = local.split('+')[0].replace(/\./g, '');
+      domain = 'gmail.com';
+    }
+    return local + '@' + domain;
   }
 
   function waiting() {
@@ -383,6 +410,9 @@
     var box = el('listRows');
     box.innerHTML = '';
     var all = data.entries;
+    Object.keys(selected).forEach(function (k) {
+      if (!all.some(function (e) { return e.email === k; })) delete selected[k];
+    });
     var rows = listFilter === 'missing' ? all.filter(function (e) { return !e.submitted; }) : all;
     var missing = all.filter(function (e) { return !e.submitted; }).length;
     el('listCount').textContent = all.length
@@ -390,9 +420,144 @@
       : 'Your list is empty. Use Upload a list to add people.';
     rows.forEach(function (e) {
       var r = rowShell(e.email, null, day(e.from) + '  to  ' + day(e.to));
+      var left = r.row.firstChild;
+      var nameEl = left.firstChild;
+      var head = document.createElement('div');
+      head.className = 'row__head';
+      var pick = document.createElement('input');
+      pick.type = 'checkbox';
+      pick.className = 'pick';
+      pick.checked = !!selected[e.email];
+      pick.setAttribute('aria-label', 'Select ' + e.email);
+      pick.addEventListener('change', function () {
+        if (pick.checked) selected[e.email] = true; else delete selected[e.email];
+        updateRemoveSelected();
+      });
+      left.insertBefore(head, nameEl);
+      head.appendChild(pick);
+      head.appendChild(nameEl);
+      if (editing === e.email) left.appendChild(dateEditor(e));
       r.side.appendChild(e.submitted ? pill('submitted', 'Submitted') : pill('waiting', 'Not submitted yet'));
-      r.side.appendChild(button('Remove', '', function (b) { removeEntry(e, b); }));
+      r.side.appendChild(button(editing === e.email ? 'Close' : 'Edit dates', '', function () {
+        editing = editing === e.email ? null : e.email;
+        renderList();
+      }));
+      r.side.appendChild(button('Remove', '', function (b) { removeEntries([e.email], b); }));
       box.appendChild(r.row);
+    });
+    updateRemoveSelected();
+  }
+
+  function updateRemoveSelected() {
+    var n = Object.keys(selected).length;
+    el('removeSelected').disabled = !n;
+    el('removeSelected').textContent = n ? 'Remove selected (' + n + ')' : 'Remove selected';
+  }
+
+  function dateEditor(e) {
+    var wrap = document.createElement('div');
+    wrap.className = 'edit';
+    var from = document.createElement('input');
+    from.type = 'date'; from.value = e.from; from.setAttribute('aria-label', 'From');
+    var to = document.createElement('input');
+    to.type = 'date'; to.value = e.to; to.setAttribute('aria-label', 'To');
+    var sep = document.createElement('span');
+    sep.className = 'count';
+    sep.textContent = 'to';
+    wrap.appendChild(from); wrap.appendChild(sep); wrap.appendChild(to);
+    wrap.appendChild(button('Save dates', 'act--approve', function (b) {
+      if (!from.value || !to.value) { notice('mainError', 'Choose both dates.'); return; }
+      if (from.value > to.value) { notice('mainError', 'From is after To.'); return; }
+      saveDates(e, from.value, to.value, b);
+    }));
+    return wrap;
+  }
+
+  /** Words for what a list change did to one visitor's request. */
+  function effectWords(outcome) {
+    var o = String(outcome || '');
+    if (/^pass withdrawn/.test(o)) return 'pass withdrawn, visitor told';
+    if (/^declined/.test(o)) return 'request declined for dates, visitor told';
+    return '';
+  }
+
+  function saveDates(e, from, to, btn) {
+    btn.disabled = true;
+    notice('mainOk', ''); notice('mainError', '');
+    post({ action: 'hostUpload', source: 'Edited on the host page',
+           entries: [{ email: e.email, from: from, to: to }] }, NETWORK_RETRIES)
+      .then(function (reply) {
+        var r = (reply.results || [])[0] || {};
+        if (!reply.ok || r.error) {
+          notice('mainError', 'Dates not saved: ' + (reply.error || r.error || 'no answer'));
+          load(true);
+          return;
+        }
+        editing = null;
+        var effect = effectWords(r.outcome);
+        notice('mainOk', 'Dates for ' + e.email + ' are now ' + day(from) + ' to ' + day(to) + '.' +
+               (effect ? ' Their ' + effect + '.' : ''), true);
+        load(true);
+      })
+      .catch(function (err) {
+        if (!err.signedOut) notice('mainError', err.message || 'Dates not saved.');
+        load(true);
+      });
+  }
+
+  /** Splits a list of addresses into requests under the body limit. */
+  function chunkEmails(emails, action) {
+    var base = JSON.stringify({ action: action, emails: [], idToken: session.idToken || '' }).length;
+    var out = [], cur = [], size = base;
+    emails.forEach(function (m) {
+      var n = JSON.stringify(m).length + 1;
+      if (cur.length && (size + n > CHUNK_CHARS || cur.length >= 150)) { out.push(cur); cur = []; size = base; }
+      cur.push(m);
+      size += n;
+    });
+    if (cur.length) out.push(cur);
+    return out;
+  }
+
+  function removeEntries(emails, btn) {
+    var who = emails.length === 1 ? emails[0] : emails.length + ' addresses';
+    if (!window.confirm('Remove ' + who + ' from your list?\n\nIf your list approved their ' +
+                        'pass, it stops working at the gate and they are told. A pass you ' +
+                        'approved by hand stays valid.')) {
+      return;
+    }
+    if (btn) btn.disabled = true;
+    notice('mainOk', ''); notice('mainError', '');
+    var parts = chunkEmails(emails, 'hostRemove');
+    var removed = 0, withdrawn = 0, done = 0;
+    function next() {
+      if (done >= parts.length) return Promise.resolve();
+      return post({ action: 'hostRemove', emails: parts[done] }, NETWORK_RETRIES).then(function (reply) {
+        // "Not on your list" for a whole part is not a failure worth stopping
+        // for: a retried request may already have removed them.
+        if (!reply.ok && !/not on your list/.test(reply.error || '')) {
+          throw new Error(reply.error || 'Could not remove those addresses.');
+        }
+        (reply.removed || []).forEach(function (m) {
+          removed++;
+          delete selected[m];
+          if (/^pass withdrawn/.test((reply.outcomes || {})[m] || '')) withdrawn++;
+        });
+        done++;
+        return next();
+      });
+    }
+    next().then(function () {
+      notice('mainOk', 'Removed ' + removed + ' address(es) from your list.' +
+             (withdrawn ? ' ' + withdrawn + ' pass(es) approved by your list were withdrawn; ' +
+                          'those visitors have been told.' : ''), true);
+      load(true);
+    }, function (err) {
+      if (!err.signedOut) {
+        notice('mainError', (err.message || 'Could not remove those addresses.') +
+               (removed ? '\n\n' + removed + ' were removed before this stopped.' : ''));
+      }
+      load(true);
     });
   }
 
@@ -432,25 +597,6 @@
       })
       .catch(function (err) {
         if (!err.signedOut) notice('mainError', err.message || 'That did not work.');
-        load(true);
-      });
-  }
-
-  function removeEntry(e, btn) {
-    if (!window.confirm('Remove ' + e.email + ' from your list?\n\nA pass already issued to them ' +
-                        'stays valid. Ask GAC if it needs revoking.')) {
-      return;
-    }
-    btn.disabled = true;
-    notice('mainOk', ''); notice('mainError', '');
-    post({ action: 'hostRemove', email: e.email })
-      .then(function (reply) {
-        if (!reply.ok) { notice('mainError', reply.error || 'Could not remove that address.'); load(true); return; }
-        notice('mainOk', 'Removed ' + e.email + ' from your list.', true);
-        load(true);
-      })
-      .catch(function (err) {
-        if (!err.signedOut) notice('mainError', err.message || 'Could not remove that address.');
         load(true);
       });
   }
@@ -629,6 +775,23 @@
       li.textContent = day(p[0]) + ' to ' + day(p[1]) + ': ' + groups[k] + ' address(es)';
       ranges.appendChild(li);
     });
+    var current = {};
+    data.entries.forEach(function (e) { current[matchKey(e.email)] = e; });
+    var inFile = {};
+    var changed = upload.entries.filter(function (e) {
+      inFile[matchKey(e.email)] = true;
+      var c = current[matchKey(e.email)];
+      return c && (c.from !== e.from || c.to !== e.to);
+    }).length;
+    el('checkChanges').hidden = !changed;
+    el('checkChanges').textContent = changed + ' address(es) already on your list get new dates. ' +
+      'Anyone your list approved whose visit no longer fits loses their pass and is told.';
+    upload.drops = data.entries.filter(function (e) { return !inFile[matchKey(e.email)]; });
+    var box = el('replaceMode');
+    box.checked = false;
+    box.disabled = !!upload.problems.length || !data.loaded;
+    renderDrops();
+
     problems.hidden = !upload.problems.length;
     upload.problems.slice(0, 50).forEach(function (text) {
       var li = document.createElement('li');
@@ -642,10 +805,56 @@
     }
   }
 
+  /** What "replace my whole list" would remove, shown before saving. */
+  function renderDrops() {
+    var note = el('replaceNote');
+    var list = el('checkDrops');
+    list.innerHTML = '';
+    list.hidden = true;
+    if (!upload || upload.fatal) { note.hidden = true; return; }
+    if (el('replaceMode').disabled) {
+      note.hidden = false;
+      note.textContent = !data.loaded
+        ? 'To replace your list, press Refresh first so the page can show who would be removed.'
+        : 'To replace your list, fix the rows that cannot be saved first. Otherwise their ' +
+          'current entries would be removed.';
+      return;
+    }
+    if (!el('replaceMode').checked) { note.hidden = true; return; }
+    note.hidden = false;
+    var drops = upload.drops || [];
+    note.textContent = drops.length
+      ? drops.length + ' address(es) on your list are not in this file and will be removed. ' +
+        'Anyone among them your list approved loses their pass and is told.'
+      : 'Nobody will be removed: everyone on your list is in this file.';
+    list.hidden = !drops.length;
+    drops.slice(0, 50).forEach(function (e) {
+      var li = document.createElement('li');
+      li.textContent = e.email;
+      list.appendChild(li);
+    });
+    if (drops.length > 50) {
+      var more = document.createElement('li');
+      more.textContent = '… and ' + (drops.length - 50) + ' more';
+      list.appendChild(more);
+    }
+  }
+
+  /** A random reference tying the parts of one replacing upload together. */
+  function newUploadId() {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    var out = 'U';
+    var bytes = new Uint8Array(20);
+    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    for (var j = 0; j < bytes.length; j++) out += chars.charAt(bytes[j] % chars.length);
+    return out;
+  }
+
   /** Splits entries into requests whose serialised body stays under the limit. */
-  function chunk(entries) {
+  function chunk(entries, uploadId) {
     var base = JSON.stringify({ action: 'hostUpload', source: upload.fileName, entries: [],
-                                idToken: session.idToken || '' }).length;
+                                uploadId: uploadId || undefined, idToken: session.idToken || '' }).length;
     var out = [], cur = [], size = base;
     entries.forEach(function (e) {
       var s = JSON.stringify({ email: e.email, from: e.from, to: e.to }).length + 1;
@@ -667,38 +876,63 @@
   }
 
   function saveList() {
-    var parts = chunk(upload.entries);
+    var replace = el('replaceMode').checked && !el('replaceMode').disabled;
+    var uploadId = replace ? newUploadId() : null;
+    var parts = chunk(upload.entries, uploadId);
     var btn = el('saveList');
     btn.disabled = true;
     el('cancelList').disabled = true;
     notice('mainOk', ''); notice('mainError', '');
-    var done = 0, saved = 0, failedAt = null;
+    var done = 0, saved = 0, failedAt = null, pruned = null, refused = 0;
 
     function next() {
       if (done >= parts.length) return Promise.resolve();
       btn.textContent = 'Saving ' + (done + 1) + ' of ' + parts.length + '\u2026';
       var part = parts[done];
-      return post({ action: 'hostUpload', source: upload.fileName,
-                    entries: part.map(function (e) { return { email: e.email, from: e.from, to: e.to }; }) },
-                  NETWORK_RETRIES)
+      var payload = { action: 'hostUpload', source: upload.fileName,
+                      entries: part.map(function (e) { return { email: e.email, from: e.from, to: e.to }; }) };
+      if (uploadId) payload.uploadId = uploadId;
+      return post(payload, NETWORK_RETRIES)
         .then(function (reply) {
           if (!reply.ok) throw new Error(reply.error || 'The server refused that part of the list.');
           part.forEach(function (e, i) {
             var r = (reply.results || [])[i] || { error: 'no answer for this row' };
             upload.status[e.row] = outcomeWords(r);
-            if (r.saved) saved++;
+            if (r.saved) saved++; else refused++;
           });
           done++;
           return next();
         });
     }
 
-    next().catch(function (err) {
+    // Replace only after EVERY row saved. A row the server refused keeps its
+    // old entry untagged, and pruning would then delete someone who IS in the
+    // file. Pruning is safe to retry: a second run finds nothing more.
+    function prune() {
+      if (!replace) return Promise.resolve();
+      if (refused) {
+        notice('mainError', 'Your list was not replaced: ' + refused + ' row(s) were not saved, ' +
+               'and replacing would remove their current entries. Nobody was removed. Fix those ' +
+               'rows (see the results file) and upload again.');
+        return Promise.resolve();
+      }
+      btn.textContent = 'Removing addresses not in the file\u2026';
+      return post({ action: 'hostPrune', uploadId: uploadId }, NETWORK_RETRIES).then(function (reply) {
+        if (!reply.ok) throw new Error(reply.error || 'Your list was saved but not replaced.');
+        // Normalised: an unexpected reply shape must not throw inside the
+        // chain and leave the done panel half-drawn.
+        pruned = { removed: reply.removed || [], outcomes: reply.outcomes || {} };
+      });
+    }
+
+    next().then(prune).catch(function (err) {
       failedAt = done;
       if (!err.signedOut) {
-        notice('mainError', (err.message || 'Saving failed.') + '\n\nParts 1 to ' + done + ' of ' +
-               parts.length + ' were saved; the rest were not. Upload the file again \u2014 ' +
-               'saving is safe to repeat.');
+        notice('mainError', done < parts.length
+          ? (err.message || 'Saving failed.') + '\n\nParts 1 to ' + done + ' of ' + parts.length +
+            ' were saved; the rest were not.' + (replace ? ' Nobody was removed.' : '') +
+            ' Upload the file again \u2014 saving is safe to repeat.'
+          : (err.message || 'Your list was saved but not replaced.') + ' Nobody was removed.');
       }
     }).then(function () {
       btn.disabled = false;
@@ -707,11 +941,17 @@
       if (!session.idToken) return;
       el('uploadCheck').hidden = true;
       el('uploadDone').hidden = false;
-      el('doneTitle').textContent = failedAt === null
+      el('doneTitle').textContent = (failedAt === null
         ? 'Saved ' + saved + ' address(es).'
-        : 'Saved ' + saved + ' address(es) before stopping.';
+        : 'Saved ' + saved + ' address(es) before stopping.') +
+        (pruned ? ' Removed ' + pruned.removed.length + ' not in the file.' : '');
+      var withdrawn = pruned ? pruned.removed.filter(function (m) {
+        return /^pass withdrawn/.test((pruned.outcomes || {})[m] || '');
+      }).length : 0;
       el('doneDetail').textContent = 'Download your file to see what happened to each row. ' +
-        'Anyone on it who has not filled in the form yet will be approved when they do.';
+        'Anyone on it who has not filled in the form yet will be approved when they do.' +
+        (withdrawn ? ' ' + withdrawn + ' removed visitor(s) had passes approved by your list; ' +
+                     'those were withdrawn and the visitors told.' : '');
       load(true);
     });
   }
@@ -823,6 +1063,11 @@
   el('refresh').addEventListener('click', load);
   el('signOut').addEventListener('click', signOut);
   el('csvFile').addEventListener('change', onFile);
+  el('replaceMode').addEventListener('change', renderDrops);
+  el('removeSelected').addEventListener('click', function () {
+    var emails = Object.keys(selected);
+    if (emails.length) removeEntries(emails, el('removeSelected'));
+  });
   el('saveList').addEventListener('click', saveList);
   el('cancelList').addEventListener('click', function () {
     upload = null;

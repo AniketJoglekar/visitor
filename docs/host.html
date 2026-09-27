@@ -112,6 +112,13 @@
   .problems { margin:10px 0 0; padding-left:18px; color:#FFD9D7; font-size:13px; line-height:1.55; }
   .buttons { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
   .fmt { font-family:var(--mono); font-size:13px; color:var(--text); }
+  /* Round 61: selecting and editing entries on Your list. */
+  .file input[type="checkbox"] { display:inline; margin:0 8px 0 0; }
+  .pick { width:18px; height:18px; margin:0 12px 0 0; flex:0 0 auto; accent-color:var(--brass); }
+  .row__head { display:flex; align-items:center; min-width:0; }
+  .edit { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+  .edit input[type="date"] { padding:8px 10px; background:var(--raised); color:var(--text);
+    border:1px solid var(--hairline); border-radius:8px; font:inherit; font-size:14px; color-scheme:dark; }
 
   .spinner { width:16px; height:16px; border:2px solid rgba(232,236,247,.28);
     border-top-color:var(--text); border-radius:50%; display:inline-block;
@@ -148,7 +155,7 @@
 <main class="wrap">
   <section id="paneSignin">
     <h1>Sign in</h1>
-    <p class="lede">For IIT Tirupati staff who host visitors. Sign in with your
+    <p class="lede">For IIT Tirupati regular faculty and staff who host visitors. Sign in with your
        @iittp.ac.in account to approve visitors who named you as their host.</p>
     <div id="gsiButton"></div>
     <div class="signin-busy" id="signinBusy" hidden>
@@ -181,14 +188,11 @@
 
     <div id="viewUpload" hidden>
       <h2>Upload a list</h2>
-      <p class="lede">For conferences and events. Visitors on your list who fill in
-         the visitor form with the same email, for dates inside their range, are
-         approved automatically — now, and as they submit. Uploading again updates
-         dates; nobody is removed by being left out.</p>
+      <p class="lede">Upload a list of emails and date ranges for bulk approvals.</p>
       <div class="panel" id="uploadPick">
         <p class="count">A CSV file with three columns: <span class="fmt">Email</span>,
            <span class="fmt">From</span>, <span class="fmt">To</span>. Dates as
-           <span class="fmt">2026-04-03</span> or day first, <span class="fmt">03-04-2026</span>.
+           <span class="fmt">2026-04-03</span>.
            In Excel: File → Save As → CSV UTF-8.</p>
         <label class="file">Choose your CSV file
           <input type="file" id="csvFile" accept=".csv,text/csv">
@@ -204,6 +208,15 @@
         <p class="count" id="checkGrace"></p>
         <ul class="ranges" id="checkRanges"></ul>
         <ul class="problems" id="checkProblems" hidden></ul>
+        <!-- Addresses already on the list whose dates this file changes. A
+             change can take back a pass the list gave, so it is said here. -->
+        <p class="count" id="checkChanges" hidden></p>
+        <label class="file" id="replaceLabel">
+          <input type="checkbox" id="replaceMode">
+          Replace my whole list: remove anyone on it who is not in this file
+        </label>
+        <p class="count" id="replaceNote" hidden></p>
+        <ul class="problems" id="checkDrops" hidden></ul>
         <div class="buttons">
           <button class="act act--approve" id="saveList">Save list</button>
           <button class="act" id="cancelList">Cancel</button>
@@ -224,6 +237,7 @@
       <div class="controls">
         <button class="chip" id="lAll" aria-pressed="true">Everyone</button>
         <button class="chip" id="lMissing" aria-pressed="false">Not submitted yet</button>
+        <button class="act act--disapprove" id="removeSelected" disabled>Remove selected</button>
       </div>
       <p class="count" id="listCount"></p>
       <div id="listRows"></div>
