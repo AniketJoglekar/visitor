@@ -334,7 +334,15 @@
     node.textContent = message;
   }
  
-  function load() {
+  /**
+   * keepNotices === true after an action: its message must survive the reload
+   * that follows. Without this (DB1, found Round 60, fixed Round 68) a refused
+   * Approve showed its reason and the reload erased it at once — which Round
+   * 68's host-approval refusals would have made invisible. Strictly === true:
+   * Refresh is a click listener and passes the event, which is truthy.
+   */
+  function load(keepNotices) {
+    var keep = keepNotices === true;
     var seq = ++loadSeq;
     el('count').innerHTML = '<span class="spinner"></span> Loading\u2026';
     post({ action: 'dashboard' }, NETWORK_RETRIES)
@@ -357,7 +365,7 @@
         el('signOut').hidden = false;
         el('paneSignin').hidden = true;
         el('paneList').hidden = false;
-        notice('listError', '');
+        if (!keep) notice('listError', '');
         if (typeof data.limit === 'number' && data.limit > 0) serverLimit = data.limit;
         passes = data.passes || [];
         render();
@@ -478,16 +486,16 @@
  
     post({ action: 'setStatus', passId: p.passId, status: status })
       .then(function (data) {
-        if (!data.ok) { notice('listError', data.error || 'Could not change that pass.'); load(); return; }
+        if (!data.ok) { notice('listError', data.error || 'Could not change that pass.'); load(true); return; }
         notice('listOk', (status === 'REVOKED' ? 'Disapproved ' : 'Approved ') +
                          (p.visitor || 'the pass') + '.', true);
-        load();
+        load(true);
       })
       .catch(function (err) {
         if (!err.signedOut) {
           notice('listError', err.message || 'Could not change that pass.');
         }
-        load();
+        load(true);
       });
   }
  
