@@ -38,11 +38,6 @@
   var NETWORK_RETRIES = 2;
 
   /**
-   * Pulls the first readable sentences out of an HTML error page so the reader
-   * can see who sent it. Tags are stripped, never rendered — this goes into
-   * textContent.
-   */
-  /**
    * Names which hop answered. Apps Script POSTs go to script.google.com, which
    * runs the script and redirects to script.googleusercontent.com, where the
    * body is actually served. Only the first hop appears in the Executions log,
@@ -61,6 +56,11 @@
     catch (err) { return text.substring(0, 60); }
   }
 
+  /**
+   * Pulls the first readable sentences out of an HTML error page so the reader
+   * can see who sent it. Tags are stripped, never rendered — this goes into
+   * textContent.
+   */
   function firstUsefulText(html) {
     var title = /<title[^>]*>([\s\S]{1,200}?)<\/title>/i.exec(html || '');
     var stripped = String(html || '')
@@ -189,12 +189,6 @@
   }
  
   /**
-   * `retries` is extra attempts for actions that change nothing. Apps Script's
-   * content hop returns a Drive 404 often enough that one attempt is not a
-   * working sign-in. `setStatus` writes, so it is deliberately not retried —
-   * a repeat could re-apply a change the operator has since reversed.
-   */
-  /**
    * Timing of the most recent reply, PER ACTION.
    *
    * This was one shared variable, which made the failure message actively
@@ -232,6 +226,12 @@
     return line;
   }
 
+  /**
+   * `retries` is extra attempts for actions that change nothing. Apps Script's
+   * content hop returns a Drive 404 often enough that one attempt is not a
+   * working sign-in. `setStatus` writes, so it is deliberately not retried —
+   * a repeat could re-apply a change the operator has since reversed.
+   */
   function post(payload, retries, attemptNo, capMs) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again.');

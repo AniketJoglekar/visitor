@@ -201,11 +201,6 @@
   var NETWORK_RETRIES = 2;
 
   /**
-   * Pulls the first readable sentences out of an HTML error page so the person
-   * holding the phone can see who sent it. Tags are stripped rather than
-   * rendered — this goes into textContent, never innerHTML.
-   */
-  /**
    * Names which hop answered. Apps Script POSTs go to script.google.com, which
    * runs the script and redirects to script.googleusercontent.com, where the
    * body is actually served. Only the first hop appears in the Executions log,
@@ -224,6 +219,11 @@
     catch (err) { return text.substring(0, 60); }
   }
 
+  /**
+   * Pulls the first readable sentences out of an HTML error page so the person
+   * holding the phone can see who sent it. Tags are stripped rather than
+   * rendered — this goes into textContent, never innerHTML.
+   */
   function firstUsefulText(html) {
     var title = /<title[^>]*>([\s\S]{1,200}?)<\/title>/i.exec(html || '');
     var stripped = String(html || '')
@@ -517,17 +517,6 @@
   }
 
   /**
-   * `retries` is the number of extra attempts for actions that are safe to
-   * repeat because they change nothing: session, photo. A scan is NOT safe to
-   * repeat blindly — it records an entry — so it passes 0 here and runs its own
-   * retry carrying a request ID the server replays against.
-   *
-   * Added because Apps Script's content hop returns a Drive 404 often enough
-   * that a single attempt is not a working sign-in. Round 21 gave scanning a
-   * retry and left sign-in without one, so a guard could be locked out at the
-   * start of a shift by a fault the scanner would have shrugged off.
-   */
-  /**
    * Timing of the most recent reply, PER ACTION.
    *
    * This was one shared variable, which made the failure message actively
@@ -565,6 +554,17 @@
     return line;
   }
 
+  /**
+   * `retries` is the number of extra attempts for actions that are safe to
+   * repeat because they change nothing: session, photo. A scan is NOT safe to
+   * repeat blindly — it records an entry — so it passes 0 here and runs its own
+   * retry carrying a request ID the server replays against.
+   *
+   * Added because Apps Script's content hop returns a Drive 404 often enough
+   * that a single attempt is not a working sign-in. Round 21 gave scanning a
+   * retry and left sign-in without one, so a guard could be locked out at the
+   * start of a shift by a fault the scanner would have shrugged off.
+   */
   function post(payload, retries, attemptNo, capMs) {
     if (!session.idToken || Date.now() > session.expiresAt - 30000) {
       requireSignIn('Your sign-in expired. Sign in again to keep scanning.');
@@ -1402,7 +1402,6 @@
     el('meter').classList.remove('meter--run');
   }
 
-  /** Wipes every trace of the previous visitor from the verdict pane. */
   /**
    * Drops every cached photograph. Called where the screen must not be usable
    * by whoever picks the phone up next — sign-out, and the idle clear that B7
@@ -1421,6 +1420,7 @@
     photoCache = photoCache.filter(function (e) { return !e.failed; });
   }
 
+  /** Wipes every trace of the previous visitor from the verdict pane. */
   function clearVerdict() {
     stopMeter();
     current = null;
