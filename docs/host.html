@@ -113,7 +113,11 @@
   .buttons { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
   .fmt { font-family:var(--mono); font-size:13px; color:var(--text); }
   /* Round 61: selecting and editing entries on Your list. */
-  .file input[type="checkbox"] { display:inline; margin:0 8px 0 0; }
+  .file input[type="radio"] { display:inline; margin:0 8px 0 0; accent-color:var(--brass); }
+  .choice { border:0; padding:0; margin:0 0 14px; }
+  .choice legend { padding:0; margin-bottom:4px; }
+  .choice .file { margin:8px 0 0; color:var(--text); line-height:1.5; }
+  .choice strong { font-weight:600; }
   .pick { width:18px; height:18px; margin:0 12px 0 0; flex:0 0 auto; accent-color:var(--brass); }
   .row__head { display:flex; align-items:center; min-width:0; }
   .edit { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
@@ -194,6 +198,17 @@
            <span class="fmt">From</span>, <span class="fmt">To</span>. Dates as
            <span class="fmt">2026-04-03</span>.
            In Excel: File → Save As → CSV UTF-8.</p>
+        <!-- Chosen BEFORE the file, where a host looks for it. Round 61 put
+             this as a checkbox at the foot of the check screen, shown only after
+             a file was read and unticked for every new file; in testing it was
+             not found at all. -->
+        <fieldset class="choice" id="uploadMode">
+          <legend class="count">What should this file do?</legend>
+          <label class="file"><input type="radio" name="uploadMode" id="modeMerge" checked>
+            <strong>Add to or update my list.</strong> Anyone already on it who is not in the file stays.</label>
+          <label class="file"><input type="radio" name="uploadMode" id="modeReplace">
+            <strong>Replace my whole list.</strong> Anyone on it who is not in the file is removed.</label>
+        </fieldset>
         <label class="file">Choose your CSV file
           <input type="file" id="csvFile" accept=".csv,text/csv">
         </label>
@@ -211,10 +226,6 @@
         <!-- Addresses already on the list whose dates this file changes. A
              change can take back a pass the list gave, so it is said here. -->
         <p class="count" id="checkChanges" hidden></p>
-        <label class="file" id="replaceLabel">
-          <input type="checkbox" id="replaceMode">
-          Replace my whole list: remove anyone on it who is not in this file
-        </label>
         <p class="count" id="replaceNote" hidden></p>
         <ul class="problems" id="checkDrops" hidden></ul>
         <div class="buttons">

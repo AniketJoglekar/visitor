@@ -136,6 +136,7 @@
     upload = null;
     selected = {};
     editing = null;
+    el('modeMerge').checked = true;
     ['waitingList', 'listRows', 'visitorsList', 'checkRanges', 'checkProblems'].forEach(function (id) {
       el(id).innerHTML = '';
     });
@@ -270,6 +271,9 @@
                  graceDays: typeof reply.graceDays === 'number' ? reply.graceDays : 1,
                  loaded: true };
         render();
+        // The replace preview is a forecast from this list; a reload with the
+        // check screen open must not leave it describing the old one.
+        if (upload && !el('uploadCheck').hidden) renderDrops();
         touchActivity();
       })
       .catch(function (err) {
@@ -777,19 +781,13 @@
     });
     var current = {};
     data.entries.forEach(function (e) { current[matchKey(e.email)] = e; });
-    var inFile = {};
     var changed = upload.entries.filter(function (e) {
-      inFile[matchKey(e.email)] = true;
       var c = current[matchKey(e.email)];
       return c && (c.from !== e.from || c.to !== e.to);
     }).length;
     el('checkChanges').hidden = !changed;
     el('checkChanges').textContent = changed + ' address(es) already on your list get new dates. ' +
       'Anyone your list approved whose visit no longer fits loses their pass and is told.';
-    upload.drops = data.entries.filter(function (e) { return !inFile[matchKey(e.email)]; });
-    var box = el('replaceMode');
-    box.checked = false;
-    box.disabled = !!upload.problems.length || !data.loaded;
     renderDrops();
 
     problems.hidden = !upload.problems.length;
@@ -805,24 +803,47 @@
     }
   }
 
-  /** What "replace my whole list" would remove, shown before saving. */
+  function replaceChosen() { return el('modeReplace').checked; }
+
+  /**
+   * The replace preview, and whether saving is allowed. Recomputed from the
+   * list as currently loaded every time, so switching the choice, or a Refresh
+   * with the check screen open, always shows what would really happen.
+   * Replace never quietly falls back to adding: when it cannot proceed, Save
+   * is disabled and the reason given.
+   */
   function renderDrops() {
     var note = el('replaceNote');
     var list = el('checkDrops');
+    var save = el('saveList');
     list.innerHTML = '';
     list.hidden = true;
     if (!upload || upload.fatal) { note.hidden = true; return; }
-    if (el('replaceMode').disabled) {
-      note.hidden = false;
-      note.textContent = !data.loaded
-        ? 'To replace your list, press Refresh first so the page can show who would be removed.'
-        : 'To replace your list, fix the rows that cannot be saved first. Otherwise their ' +
-          'current entries would be removed.';
+    save.disabled = false;
+    if (!replaceChosen()) {
+      note.hidden = true;
+      save.textContent = 'Save list';
+      upload.drops = [];
       return;
     }
-    if (!el('replaceMode').checked) { note.hidden = true; return; }
+    save.textContent = 'Replace list';
     note.hidden = false;
-    var drops = upload.drops || [];
+    if (!data.loaded) {
+      note.textContent = 'Your list has not loaded, so the page cannot show who would be removed. ' +
+                         'Press Refresh.';
+      save.disabled = true;
+      return;
+    }
+    if (upload.problems.length) {
+      note.textContent = 'Your list cannot be replaced while ' + upload.problems.length +
+        ' row(s) cannot be saved: their current entries would be removed. Fix those rows, ' +
+        'or choose Add to or update my list.';
+      save.disabled = true;
+      return;
+    }
+    var inFile = {};
+    upload.entries.forEach(function (e) { inFile[matchKey(e.email)] = true; });
+    var drops = upload.drops = data.entries.filter(function (e) { return !inFile[matchKey(e.email)]; });
     note.textContent = drops.length
       ? drops.length + ' address(es) on your list are not in this file and will be removed. ' +
         'Anyone among them your list approved loses their pass and is told.'
@@ -835,7 +856,7 @@
     });
     if (drops.length > 50) {
       var more = document.createElement('li');
-      more.textContent = '… and ' + (drops.length - 50) + ' more';
+      more.textContent = '\u2026 and ' + (drops.length - 50) + ' more';
       list.appendChild(more);
     }
   }
@@ -876,7 +897,17 @@
   }
 
   function saveList() {
-    var replace = el('replaceMode').checked && !el('replaceMode').disabled;
+    var replace = replaceChosen();
+    // Belt and braces: Save is disabled in these cases, but a replace must
+    // never run against an unloaded list or a file with unsaved rows.
+    if (replace && (!data.loaded || upload.problems.length)) return;
+    var dropCount = (upload.drops || []).length;
+    if (replace && dropCount &&
+        !window.confirm('Replace your list?\n\n' + dropCount + ' address(es) not in this file ' +
+                        'will be removed. If your list approved their pass, it stops working at ' +
+                        'the gate and they are told.')) {
+      return;
+    }
     var uploadId = replace ? newUploadId() : null;
     var parts = chunk(upload.entries, uploadId);
     var btn = el('saveList');
@@ -938,6 +969,8 @@
       btn.disabled = false;
       el('cancelList').disabled = false;
       btn.textContent = 'Save list';
+      // Back to the safe default, so the next file is not a replace by habit.
+      el('modeMerge').checked = true;
       if (!session.idToken) return;
       el('uploadCheck').hidden = true;
       el('uploadDone').hidden = false;
@@ -1063,7 +1096,8 @@
   el('refresh').addEventListener('click', load);
   el('signOut').addEventListener('click', signOut);
   el('csvFile').addEventListener('change', onFile);
-  el('replaceMode').addEventListener('change', renderDrops);
+  el('modeMerge').addEventListener('change', renderDrops);
+  el('modeReplace').addEventListener('change', renderDrops);
   el('removeSelected').addEventListener('click', function () {
     var emails = Object.keys(selected);
     if (emails.length) removeEntries(emails, el('removeSelected'));
