@@ -300,6 +300,20 @@
         deliveryMs: (typeof data.serverMs === 'number') ? roundTripMs - data.serverMs : null
       };
 
+      // A throttle is not a transport failure. The server marks it, and this
+      // marks the error so post()'s retry loop and the scan loop both leave it
+      // alone — retrying a throttle counts against the same bucket and makes
+      // the wait longer.
+      //
+      // Three places already test err.rateLimited. Nothing set it: the server
+      // half of this contract survived a client revert and the client half did
+      // not, so a throttled scan was retried eight times and then reported as
+      // "no answer from the server" — the opposite of what had happened.
+      if (data && data.ok === false && data.rateLimited) {
+        var throttled = new Error(data.error || 'Scanning is being throttled.');
+        throttled.rateLimited = true;
+        throw throttled;
+      }
       if (data && data.authError) { requireSignIn(data.error); throw signedOut(data.error); }
       return data;
     }).catch(function (err) {

@@ -658,6 +658,20 @@
         serverMs: (typeof data.serverMs === 'number') ? data.serverMs : null,
         deliveryMs: (typeof data.serverMs === 'number') ? roundTripMs - data.serverMs : null
       };
+      // A throttle is not a transport failure. The server marks it, and this
+      // marks the error so post()'s retry loop and the scan loop both leave it
+      // alone — retrying a throttle counts against the same bucket and makes
+      // the wait longer.
+      //
+      // Three places already test err.rateLimited. Nothing set it: the server
+      // half of this contract survived a client revert and the client half did
+      // not, so a throttled scan was retried eight times and then reported as
+      // "no answer from the server" — the opposite of what had happened.
+      if (data && data.ok === false && data.rateLimited) {
+        var throttled = new Error(data.error || 'Scanning is being throttled.');
+        throttled.rateLimited = true;
+        throw throttled;
+      }
       if (data && data.authError) {
         requireSignIn(data.error);
         // Marked, not matched on text. This used to throw a plain Error whose
@@ -930,6 +944,11 @@
     if (!reuseRequestId && token === lastToken.value && now - lastToken.at < 2500) return;
     lastToken = { value: token, at: now };
 
+    // No vehicle stated for this visitor yet — the previous scan failed and
+    // its number was cleared. Ask before scanning rather than logging the last
+    // visitor's plate against this one.
+    if (mode.vehicle === null) { showVehiclePrompt(); return; }
+
     tally.attempts++;
     el('scanRetry').hidden = true;
     retryPending = null;
@@ -1087,6 +1106,15 @@
       // directly, so counting in fail() missed every give-up caused by a reply
       // that arrived but was unusable.
       tally.gaveUp++;
+      // Captured BEFORE it is cleared, or the retry below resends null.
+      var vehicleUsed = mode.vehicle;
+      // The number belonged to the visitor whose scan just failed. Cleared so
+      // the next pass scanned cannot be logged under it — onCode() sends the
+      // guard back to the prompt while this is null. Without it, a failure
+      // attributed the next visitor to the previous one's vehicle, which is
+      // exactly the fault the per-visitor prompt was built to remove, left on
+      // the one path where it fires most.
+      mode.vehicle = null;
       leaveCapturedState();
 
       lastDiagnostic =
@@ -1103,7 +1131,10 @@
       // Offer the same pass, not a fresh scan: the request id is reused, so
       // within the replay window the server returns the decision it already
       // made instead of recording a second entry.
-      retryPending = { token: token, requestId: requestId };
+      // The vehicle travels with the pending retry. A retry is the SAME
+      // visitor, so it must resend the number that scan used — while
+      // mode.vehicle is cleared above, so a DIFFERENT pass cannot inherit it.
+      retryPending = { token: token, requestId: requestId, vehicle: vehicleUsed };
       el('scanRetry').hidden = false;
 
       resumeScanning();
@@ -1116,6 +1147,7 @@
         // Not a failed scan and not a pass problem. Say so plainly rather than
         // routing it through the "no answer" message, which would send a guard
         // chasing a fault that does not exist.
+        mode.vehicle = null;
         leaveCapturedState();
         notice('scanError', err.message);
         resumeScanning();
@@ -1589,6 +1621,9 @@
   el('scanRetry').addEventListener('click', function () {
     if (!retryPending) return;
     var pending = retryPending;
+    // Restored before the retry so onCode() sends the number this visitor was
+    // scanned with, and passes the null check above.
+    mode.vehicle = pending.vehicle;
     el('scanRetry').hidden = true;
     notice('scanError', '');
     onCode(pending.token, pending.requestId);

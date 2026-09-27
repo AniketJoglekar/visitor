@@ -169,7 +169,7 @@
   .signin { align-items: center; text-align: center; }
 
   /* Two auto margins split the spare height: the heading and button sit near
-     the middle, the dashboard link settles at the bottom. */
+     the middle, the links to the other pages settle at the bottom. */
   .signin__mid {
     margin-top: auto;
     display: flex;
@@ -179,7 +179,14 @@
     width: 100%;
   }
 
-  .signin .sidelink { margin-top: auto; margin-bottom: 2px; }
+  /* The auto margin is on the WRAPPER, not on each link. On each link it
+     would split the spare height between them and leave one stranded
+     mid-column — Round 57's fault in another form. */
+  .signin .sidelinks {
+    margin-top: auto; margin-bottom: 2px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+  }
+  .sidelinks .sidelink { margin-top: 0; }
 
   .btn {
     display: block;
@@ -314,7 +321,7 @@
     align-items: stretch;
     gap: 14px;
   }
-  .btn--big { padding: 26px 12px; font-size: 20px; font-weight: 700; }
+  .btn--big { font-size: 20px; font-weight: 700; }
   .mode__vehicle { margin-top: 26px; }
   .mode__chosen { margin: 0 0 14px; opacity: .75; }
   .mode__label { display: block; margin-bottom: 8px; font-weight: 600; }
@@ -325,7 +332,6 @@
     text-transform: uppercase;
   }
   .mode__vehicle .btn { width: 100%; margin-top: 14px; }
-  .btn--quiet { background: transparent; border: 1px solid currentColor; opacity: .8; }
   .bar__mode { opacity: .75; }
 
 
@@ -844,7 +850,12 @@
     </div>
     <p class="notice" id="signinError" hidden></p>
   </div>
-  <a class="sidelink" href="dashboard.html">Pass dashboard <span>&rarr;</span></a>
+  <!-- Secondary, like the dashboard link: gate staff are refused by both
+       pages. host.html is for staff approving visitors who named them. -->
+  <div class="sidelinks">
+    <a class="sidelink" href="dashboard.html">Pass dashboard <span>&rarr;</span></a>
+    <a class="sidelink" href="host.html">Host approvals <span>&rarr;</span></a>
+  </div>
 </section>
 
 <!-- Camera -->
