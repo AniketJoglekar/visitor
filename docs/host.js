@@ -35,7 +35,7 @@
   // The oldest server this page works with — Code.gs HOST_API_ROUND. An older
   // deployment lacks the actions for removing and replacing; t-claims.js
   // fails if the two numbers disagree.
-  var REQUIRED_API_ROUND = 63;
+  var REQUIRED_API_ROUND = 64;
   var OUTDATED = 'The server has not been updated to match this page: its Apps Script ' +
     'deployment is an older version. Ask GAC to open the script and choose Deploy \u2192 ' +
     'Manage deployments \u2192 edit (pencil) \u2192 Version: New version \u2192 Deploy. ' +
@@ -921,10 +921,20 @@
     return words + (r.note ? ' (' + r.note + ')' : '');
   }
 
+  /** Refused rows as lines a host can act on, without opening the results file. */
+  function refusedLines(items) {
+    var lines = items.slice(0, 10).map(function (x) {
+      return 'Row ' + x.row + ' (' + x.email + '): ' + x.error;
+    });
+    if (items.length > 10) lines.push('\u2026 and ' + (items.length - 10) + ' more.');
+    return lines.join('\n');
+  }
+
   function saveList() {
     var replace = replaceChosen();
     // Belt and braces: Save is disabled in these cases, but a replace must
-    // never run against an unloaded list or a file with unsaved rows.
+    // never run against an unloaded list, an old server, or a file with
+    // unreadable rows.
     if (replace && (!data.loaded || data.outdated || upload.problems.length)) return;
     var dropCount = (upload.drops || []).length;
     if (replace && dropCount &&
@@ -939,14 +949,50 @@
     btn.disabled = true;
     el('cancelList').disabled = true;
     notice('mainOk', ''); notice('mainError', '');
-    var done = 0, saved = 0, failedAt = null, pruned = null, refused = 0;
+    var phase = replace ? 'check' : 'save';
+    var checked = 0, done = 0, saved = 0, failedAt = null, pruned = null;
+    var wouldRefuse = [], refusedRows = [], aborted = false;
+
+    var toSend = function (part) {
+      return part.map(function (e) { return { email: e.email, from: e.from, to: e.to }; });
+    };
+
+    // Round 64: a replace is all-or-nothing. Every part is checked by the
+    // server first, saving nothing; any refused row stops it before anything
+    // is saved. Round 63 saved the good rows, then stopped at a refused one,
+    // leaving new dates in force and nobody removed.
+    function precheck() {
+      if (!replace || checked >= parts.length) return Promise.resolve();
+      btn.textContent = 'Checking ' + (checked + 1) + ' of ' + parts.length + '\u2026';
+      var part = parts[checked];
+      return post({ action: 'hostUpload', dryRun: true, source: upload.fileName, entries: toSend(part) },
+                  NETWORK_RETRIES)
+        .then(function (reply) {
+          if (!reply.ok) throw new Error(reply.error || 'The server could not check that part of the file.');
+          // A server older than Round 64 ignores dryRun and SAVES. The version
+          // check refuses replace against one; this catches it regardless.
+          if (reply.dryRun !== true) {
+            var stale = new Error(OUTDATED + ' Part of the file may have been saved; nobody was removed.');
+            stale.saved = true;
+            throw stale;
+          }
+          part.forEach(function (e, i) {
+            var r = (reply.results || [])[i] || { error: 'no answer for this row' };
+            if (r.error) {
+              wouldRefuse.push({ row: e.row + 1, email: e.email, error: r.error });
+              upload.status[e.row] = 'Not saved: ' + r.error;
+            }
+          });
+          checked++;
+          return precheck();
+        });
+    }
 
     function next() {
       if (done >= parts.length) return Promise.resolve();
       btn.textContent = 'Saving ' + (done + 1) + ' of ' + parts.length + '\u2026';
       var part = parts[done];
-      var payload = { action: 'hostUpload', source: upload.fileName,
-                      entries: part.map(function (e) { return { email: e.email, from: e.from, to: e.to }; }) };
+      var payload = { action: 'hostUpload', source: upload.fileName, entries: toSend(part) };
       if (uploadId) payload.uploadId = uploadId;
       return post(payload, NETWORK_RETRIES)
         .then(function (reply) {
@@ -954,37 +1000,57 @@
           part.forEach(function (e, i) {
             var r = (reply.results || [])[i] || { error: 'no answer for this row' };
             upload.status[e.row] = outcomeWords(r);
-            if (r.saved) saved++; else refused++;
+            if (r.saved) saved++;
+            else refusedRows.push({ row: e.row + 1, email: e.email, error: r.error || 'not saved' });
           });
           done++;
           return next();
         });
     }
 
-    // Replace only after EVERY row saved. A row the server refused keeps its
-    // old entry untagged, and pruning would then delete someone who IS in the
-    // file. Pruning is safe to retry: a second run finds nothing more.
+    // Still guarded after the check: the list can change between check and
+    // save (another tab, the list filling up). A row refused here keeps its
+    // old entry untagged, and pruning would delete someone who IS in the file.
     function prune() {
       if (!replace) return Promise.resolve();
-      if (refused) {
-        notice('mainError', 'Your list was not replaced: ' + refused + ' row(s) were not saved, ' +
-               'and replacing would remove their current entries. Nobody was removed. Fix those ' +
-               'rows (see the results file) and upload again.');
+      if (refusedRows.length) {
+        notice('mainError', 'Your list was not replaced: ' + refusedRows.length +
+               ' row(s) were refused while saving.\n\n' + refusedLines(refusedRows) +
+               '\n\nThe other ' + saved + ' row(s) WERE saved \u2014 added, or their dates ' +
+               'updated \u2014 but nobody was removed. Fix those rows and upload again.');
         return Promise.resolve();
       }
       btn.textContent = 'Removing addresses not in the file\u2026';
       return post({ action: 'hostPrune', uploadId: uploadId }, NETWORK_RETRIES).then(function (reply) {
         if (!reply.ok) throw new Error(reply.error || 'Your list was saved but not replaced.');
-        // Normalised: an unexpected reply shape must not throw inside the
-        // chain and leave the done panel half-drawn.
         pruned = { removed: reply.removed || [], outcomes: reply.outcomes || {} };
       });
     }
 
-    next().then(prune).catch(function (err) {
+    precheck().then(function () {
+      if (wouldRefuse.length) {
+        aborted = true;
+        notice('mainError', 'Nothing was saved and nobody was removed: ' + wouldRefuse.length +
+               ' row(s) in this file would be refused.\n\n' + refusedLines(wouldRefuse) +
+               '\n\nFix or delete those rows and choose the file again \u2014 or choose ' +
+               '\u201cAdd to or update my list\u201d to save the other rows without removing anyone.');
+        return;
+      }
+      phase = 'save';
+      return next().then(prune);
+    }).catch(function (err) {
+      if (phase === 'check' && !err.saved) {
+        aborted = true;
+        if (!err.signedOut) {
+          notice('mainError', 'Could not check the file: ' + (err.message || 'no answer') +
+                 '\n\nNothing was saved and nobody was removed.');
+        }
+        return;
+      }
       failedAt = done;
       if (!err.signedOut) {
-        notice('mainError', done < parts.length
+        notice('mainError', err.saved ? err.message
+          : done < parts.length
           ? (err.message || 'Saving failed.') + '\n\nParts 1 to ' + done + ' of ' + parts.length +
             ' were saved; the rest were not.' + (replace ? ' Nobody was removed.' : '') +
             ' Upload the file again \u2014 saving is safe to repeat.'
@@ -993,6 +1059,12 @@
     }).then(function () {
       btn.disabled = false;
       el('cancelList').disabled = false;
+      if (aborted) {
+        // Nothing happened: the check screen stays, with the choice as made,
+        // so the host can switch to adding or pick a corrected file.
+        renderDrops();
+        return;
+      }
       btn.textContent = 'Save list';
       // Back to the safe default, so the next file is not a replace by habit.
       el('modeMerge').checked = true;
