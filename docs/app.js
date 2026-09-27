@@ -1491,7 +1491,13 @@
     // `visitor.purpose` is the wire field name, kept so the server and client
     // do not have to be renamed in lockstep. The label is what the guard reads.
     if (visitor.purpose) rows.push({ label: 'Venue', value: visitor.purpose, clamp: true });
-    if (visitor.host || visitor.hostPhone) {
+    if (visitor.hostPhoneWithheld) {
+      // Round 66 (V2). The visitor filed this pass and typed the host's name
+      // and phone themselves, so the server sends neither: `host` is the
+      // verified host email instead (Round 67), and calling a typed number
+      // could reach an accomplice. The guard is sent to the directory.
+      rows.push({ label: 'Host', value: visitor.host || '', directory: true });
+    } else if (visitor.host || visitor.hostPhone) {
       rows.push({ label: 'Host', value: visitor.host || '', tel: visitor.hostPhone || '' });
     }
     if (visitor.visitorPhone) {
@@ -1510,7 +1516,13 @@
       var dd = document.createElement('dd');
       if (row.clamp) dd.className = 'clamp';
 
-      if (row.tel) {
+      if (row.directory) {
+        if (row.value) dd.appendChild(document.createTextNode(row.value + '  \u00b7  '));
+        var check = document.createElement('span');
+        check.className = 'directory';
+        check.textContent = 'Check name and phone in Phone directory';
+        dd.appendChild(check);
+      } else if (row.tel) {
         // Name and number share one line; the number stays tappable so the gate
         // can call the host without retyping. The server has already stripped it
         // to dialable characters only.

@@ -392,6 +392,11 @@
     max-width: 24ch;
   }
 
+  /* Round 66: on a visitor-filed pass the host phone was typed by the visitor
+     and is not shown; this sends the guard to the directory instead. Amber:
+     a caution, not a verdict — green and red mean ALLOW and DENY. */
+  .facts dd .directory { color: var(--warn); font-weight: 600; }
+
   .facts dd a {
     color: var(--brass);
     text-decoration: none;
