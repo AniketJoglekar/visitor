@@ -32,6 +32,14 @@
   // first attempt would abort them mid-send and report a failure for work
   // that then completed.
   var SLOW_ACTION_MS = { hostUpload: 30000, hostDecide: 30000 };
+  // The oldest server this page works with — Code.gs HOST_API_ROUND. An older
+  // deployment lacks the actions for removing and replacing; t-claims.js
+  // fails if the two numbers disagree.
+  var REQUIRED_API_ROUND = 63;
+  var OUTDATED = 'The server has not been updated to match this page: its Apps Script ' +
+    'deployment is an older version. Ask GAC to open the script and choose Deploy \u2192 ' +
+    'Manage deployments \u2192 edit (pencil) \u2192 Version: New version \u2192 Deploy. ' +
+    'Do not create a new deployment \u2014 that changes the address this page uses.';
   // doPost() refuses bodies over 8192 characters. Chunks are sized against the
   // real serialised body, ID token included, with room to spare.
   var CHUNK_CHARS = 7200;
@@ -132,7 +140,8 @@
     // loaded: false blocks "replace my whole list" until the list is fetched
     // again: previewing removals against an empty copy would promise that
     // nobody is removed while the server removed everyone.
-    data = { visitors: [], entries: [], graceDays: data.graceDays, loaded: false };
+    data = { visitors: [], entries: [], graceDays: data.graceDays, loaded: false, outdated: false };
+    notice('serverWarning', '');
     upload = null;
     selected = {};
     editing = null;
@@ -220,6 +229,11 @@
         throw throttled;
       }
       if (reply && reply.authError) { requireSignIn(reply.error); throw signedOut(reply.error); }
+      // An older deployment answers a newer action this way. Said plainly:
+      // Round 62 showed it raw, and a replace that removed nobody went unnoticed.
+      if (reply && reply.ok === false && reply.error === 'Unknown action.') {
+        reply.error = OUTDATED + ' Nothing was changed by that step.';
+      }
       return reply;
     }).catch(function (err) {
       if (err.signedOut || err.rateLimited || budget <= 0) throw err;
@@ -269,7 +283,12 @@
         if (!keep) notice('mainError', '');
         data = { visitors: reply.visitors || [], entries: reply.entries || [],
                  graceDays: typeof reply.graceDays === 'number' ? reply.graceDays : 1,
-                 loaded: true };
+                 loaded: true,
+                 outdated: !(typeof reply.apiRound === 'number' && reply.apiRound >= REQUIRED_API_ROUND) };
+        notice('serverWarning', data.outdated
+          ? OUTDATED + ' Until then, removing and replacing addresses will fail, and ' +
+            'passes will not be withdrawn.'
+          : '');
         render();
         // The replace preview is a forecast from this list; a reload with the
         // check screen open must not leave it describing the old one.
@@ -834,6 +853,12 @@
       save.disabled = true;
       return;
     }
+    if (data.outdated) {
+      note.textContent = 'Your list cannot be replaced until the server is updated (see the ' +
+                         'warning at the top). Nobody would be removed.';
+      save.disabled = true;
+      return;
+    }
     if (upload.problems.length) {
       note.textContent = 'Your list cannot be replaced while ' + upload.problems.length +
         ' row(s) cannot be saved: their current entries would be removed. Fix those rows, ' +
@@ -900,7 +925,7 @@
     var replace = replaceChosen();
     // Belt and braces: Save is disabled in these cases, but a replace must
     // never run against an unloaded list or a file with unsaved rows.
-    if (replace && (!data.loaded || upload.problems.length)) return;
+    if (replace && (!data.loaded || data.outdated || upload.problems.length)) return;
     var dropCount = (upload.drops || []).length;
     if (replace && dropCount &&
         !window.confirm('Replace your list?\n\n' + dropCount + ' address(es) not in this file ' +
