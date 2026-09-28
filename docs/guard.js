@@ -2,9 +2,11 @@
  * Loaded first, before anything renders.
  *
  * The CSP in index.html cannot stop this page being framed: browsers ignore
- * frame-ancestors when CSP arrives in a <meta> tag, and GitHub Pages does not
- * let you set response headers, so neither frame-ancestors nor X-Frame-Options
- * can be delivered. That leaves a script check as the only available defence.
+ * frame-ancestors when CSP arrives in a <meta> tag. Where the host cannot set
+ * response headers (GitHub Pages cannot), neither frame-ancestors nor
+ * X-Frame-Options can be delivered, and this script is the only defence. On
+ * the internal server, send both as headers as well (SELF-HOSTING.md): they
+ * hold even where a script is stopped from running.
  *
  * Why it matters: a framed copy of the scanner lets an attacker overlay their
  * own controls on a signed-in gate session — an invisible control under
